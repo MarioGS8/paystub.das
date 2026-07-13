@@ -1,0 +1,505 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Paystub Extractor</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: system-ui, -apple-system, sans-serif; background: #f5f5f3; color: #1a1a18; min-height: 100vh; padding: 2rem 1rem; }
+  .container { max-width: 1100px; margin: 0 auto; }
+  h1 { font-size: 22px; font-weight: 500; margin-bottom: 0.25rem; }
+  .subtitle { font-size: 14px; color: #5f5e5a; margin-bottom: 2rem; }
+  .card { background: #fff; border: 0.5px solid rgba(0,0,0,0.12); border-radius: 12px; padding: 1.25rem 1.5rem; margin-bottom: 1.25rem; }
+  .card-title { font-size: 13px; font-weight: 500; color: #5f5e5a; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 1rem; }
+  .upload-zone { border: 1.5px dashed rgba(0,0,0,0.2); border-radius: 10px; padding: 2rem; text-align: center; cursor: pointer; transition: border-color 0.15s; background: #fafafa; }
+  .upload-zone:hover, .upload-zone.dragover { border-color: rgba(0,0,0,0.4); background: #f0f0ee; }
+  .upload-zone p { font-size: 14px; color: #5f5e5a; }
+  .upload-zone .filename { font-size: 13px; color: #3b6d11; font-weight: 500; margin-top: 0.5rem; }
+  input[type="file"] { display: none; }
+  .error-msg { background: #fcebeb; color: #a32d2d; border-radius: 8px; padding: 10px 14px; font-size: 13px; margin-top: 0.75rem; }
+  .status-msg { font-size: 13px; color: #5f5e5a; margin-top: 0.75rem; }
+
+  .results { margin-top: 1.5rem; }
+  .stub-card { background: #fff; border: 0.5px solid rgba(0,0,0,0.12); border-radius: 12px; margin-bottom: 1.25rem; overflow: hidden; }
+  .stub-header { display: flex; justify-content: space-between; align-items: center; padding: 1rem 1.25rem; background: #1a1a18; }
+  .stub-name { font-size: 15px; font-weight: 500; color: #fff; }
+  .stub-period { font-size: 12px; color: rgba(255,255,255,0.6); }
+  .stub-type-badge { font-size: 11px; padding: 3px 9px; border-radius: 5px; background: rgba(255,255,255,0.12); color: #fff; margin-left: 8px; }
+  .stub-body { padding: 1rem 1.25rem; display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; }
+  @media(max-width:750px){ .stub-body { grid-template-columns: 1fr; } }
+
+  .field-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  .field-table th { text-align: left; color: #5f5e5a; font-weight: 500; padding: 4px 8px 8px 0; border-bottom: 0.5px solid rgba(0,0,0,0.1); }
+  .field-table td { padding: 6px 8px 6px 0; border-bottom: 0.5px solid rgba(0,0,0,0.05); vertical-align: middle; }
+  .field-table tr.blank-row td { color: #b8b7b3; font-style: italic; font-size: 12px; }
+  .field-table input[type="number"] { width: 100px; padding: 5px 7px; border: 0.5px solid rgba(0,0,0,0.2); border-radius: 6px; font-size: 13px; text-align: right; background: #fffde7; }
+  .field-table input[type="text"] { width: 100%; padding: 5px 7px; border: 0.5px solid rgba(0,0,0,0.2); border-radius: 6px; font-size: 13px; }
+  .field-table select { padding: 5px 7px; border: 0.5px solid rgba(0,0,0,0.2); border-radius: 6px; font-size: 12px; background: #fff; }
+
+  .flag-row td { background: #faeeda; }
+  .flag-row .flag-note { color: #854f0b; font-size: 11px; display: block; margin-top: 2px; }
+  .flag-red td { background: #fcebeb; }
+  .flag-red .flag-note { color: #a32d2d; font-size: 11px; display: block; margin-top: 2px; }
+
+  .copy-block { background: #f5f5f3; border-radius: 8px; padding: 0.75rem; }
+  .copy-block-title { font-size: 12px; color: #5f5e5a; margin-bottom: 6px; display: flex; justify-content: space-between; align-items: center; }
+  .copy-btn { font-size: 12px; padding: 5px 12px; background: #1a1a18; color: #fff; border: none; border-radius: 6px; cursor: pointer; }
+  .copy-btn:hover { opacity: 0.85; }
+  .copy-btn.copied { background: #0f6e56; }
+  textarea.copy-paste { width: 100%; min-height: 220px; font-family: ui-monospace, 'SF Mono', Menlo, monospace; font-size: 13px; padding: 10px; border: 0.5px solid rgba(0,0,0,0.15); border-radius: 6px; background: #fff; resize: vertical; line-height: 1.6; }
+  .copy-hint { font-size: 11px; color: #5f5e5a; margin-top: 6px; }
+
+  .das-hint { font-size: 11px; color: #5f5e5a; margin-top: 4px; }
+  .other-warning { background: #faeeda; border-radius: 8px; padding: 10px 14px; font-size: 12px; color: #854f0b; margin-top: 0.75rem; }
+  .other-warning strong { display:block; margin-bottom:2px; }
+  .duplicate-warning { background: #fcebeb; border-radius: 8px; padding: 10px 14px; font-size: 12px; color: #a32d2d; margin-bottom: 1rem; }
+  .swing-warning { background: #faeeda; border-radius: 8px; padding: 10px 14px; font-size: 12px; color: #854f0b; margin-bottom: 1rem; }
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>Paystub extractor</h1>
+  <p class="subtitle">Activ Axion · QuickBooks paystub PDF → Employee Costs sheet values, no API calls</p>
+
+  <div class="card">
+    <div class="card-title">Upload paystubs</div>
+    <p style="font-size:13px;color:#5f5e5a;margin-bottom:1rem;">Drop one or more QuickBooks paystub PDFs. Everything is parsed in your browser — nothing is uploaded anywhere.</p>
+    <div class="upload-zone" id="drop-zone">
+      <p>📄 Drop PDF(s) here or click to browse</p>
+      <div class="filename" id="filename-display"></div>
+    </div>
+    <input type="file" id="file-input" accept=".pdf" multiple>
+    <div class="status-msg" id="status-msg"></div>
+    <div class="error-msg" id="error-msg" style="display:none"></div>
+  </div>
+
+  <div class="results" id="results"></div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script>
+pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+
+// ---- Constants ported from the Apps Script (calculateDAS, employee lookup) ----
+const HSF_RATE = 0.0165;
+const CNESST_RATE = 0.0083; // periodic remittance rate per CNESST classification decision, NOT the indicative "taux de prime" (0.833%)
+
+// Employee-type lookup: which sheet block layout this employee uses.
+// Matched by substring against the lowercased extracted name, same approach as the
+// Apps Script's SCRIPT_2025/MANUAL_2026 tables (name keys, not tied to a specific year).
+const TYPE_LOOKUP = [
+  { keys: ['starnino','mario'], type: 'mario' },
+  { keys: ['katherine','campeau','kathy'], type: 'kathy' },
+];
+function detectType(name) {
+  const n = (name||'').toLowerCase();
+  for (const entry of TYPE_LOOKUP) {
+    if (entry.keys.some(k => n.includes(k))) return entry.type;
+  }
+  return 'regular';
+}
+function isMarioName(name) {
+  const n = (name||'').toLowerCase();
+  return n.includes('mario') || n.includes('starnino');
+}
+
+// Row order per employee type, matching the Apps Script's fieldRowMap offsets exactly
+// (including the blank row 8 gap before the CI/RBC row at offset 9). This is what makes
+// the copy-paste block line up with the actual sheet columns.
+const ROW_ORDER = {
+  kathy:   [ {f:'gross_income',label:'Gross Income'}, {f:'stat_holiday_pay',label:'Stat Holiday Pay'}, {f:'vacation_paid',label:'Vacation Paid'}, {f:'das_total',label:'DAS Total'} ],
+  mario:   [ {f:'gross_income',label:'Gross Income'}, {f:'stat_holiday_pay',label:'Stat Holiday Pay'}, {f:'personal_day',label:'Personal Day'}, {f:'bonus',label:'Bonus'}, {f:'commission',label:'Commission'}, {f:'vacation_paid',label:'Vacation Paid'}, {f:'das_total',label:'DAS Total'}, {blank:true}, {f:'ci_insurance_rop',label:'Critical Illness (ROP)'} ],
+  regular: [ {f:'gross_income',label:'Gross Income'}, {f:'stat_holiday_pay',label:'Stat Holiday Pay'}, {f:'personal_day',label:'Personal Day'}, {f:'bonus',label:'Bonus'}, {f:'commission',label:'Commission'}, {f:'vacation_paid',label:'Vacation Paid'}, {f:'das_total',label:'DAS Total'}, {blank:true}, {f:'rbc_company_contributions',label:'RBC Company Contributions'} ],
+};
+
+function calculateDAS(data, isMario) {
+  const qpp = data.qpp_employee || 0;
+  const qpip = data.qpip_employee || 0;
+  const ei = data.ei_employee || 0;
+  const gross = data.gross_income || 0;
+  const employerBenefitsTotal = data.employer_benefits_total || 0;
+  const employerRRSP = data.employer_rrsp_total || 0;
+  const qppEmployer = Math.round(qpp * 100) / 100;
+  const qpipEmployer = Math.round(qpip * 1.4 * 100) / 100;
+  const eiEmployer = Math.round(ei * 1.4 * 100) / 100;
+  const hsfBase = gross + employerBenefitsTotal;
+  const hsf = Math.round(hsfBase * HSF_RATE * 100) / 100;
+  const cnesstBase = gross + employerRRSP;
+  const cnesst = isMario ? 0 : Math.round(cnesstBase * CNESST_RATE * 100) / 100;
+  return Math.round((qppEmployer + qpipEmployer + eiEmployer + hsf + cnesst) * 100) / 100;
+}
+
+// ---- PDF parsing ----
+// Splits a reconstructed line of text into a leading label and a trailing run of
+// numeric-looking tokens ('-' placeholders or values with exactly 2 decimals, since
+// that's how every Current/YTD/Hours/Rate figure is formatted on this paystub template).
+function splitLabelAndNumbers(text) {
+  const tokens = text.trim().split(/\s+/).filter(t => t.length);
+  const isStrictNum = t => /^\$?\d[\d,]*\.\d{2}$/.test(t);
+  // Scan from the right: a token joins the trailing numeric run if it's a properly
+  // formatted number, or a bare '-' placeholder immediately adjacent (to its right)
+  // to the run already being built. This stops a mid-label hyphen (as in "RBC - GRSP"
+  // or "Treatment - 30 Minutes") from being mistaken for a blank Hours/Rate column,
+  // since the scan halts the instant it hits a token that isn't a number or a
+  // contiguous placeholder dash.
+  let splitIdx = tokens.length;
+  for (let i = tokens.length - 1; i >= 0; i--) {
+    if (isStrictNum(tokens[i]) || tokens[i] === '-') { splitIdx = i; }
+    else break;
+  }
+  const label = tokens.slice(0, splitIdx).join(' ').replace(/:$/, '').trim();
+  const numbers = tokens.slice(splitIdx).filter(t => t !== '-').map(t => parseFloat(t.replace(/[$,]/g, '')));
+  return { label, numbers };
+}
+
+function blankStub() {
+  return {
+    employee_name: '', pay_period_start: '', pay_period_end: '',
+    gross_income: 0, stat_holiday_pay: 0, personal_day: 0, bonus: 0, commission: 0,
+    vacation_paid: 0, other: 0, ei_employee: 0, qpp_employee: 0, qpip_employee: 0,
+    ci_insurance_rop: 0, rbc_company_contributions: 0,
+    employer_benefits_total: 0, employer_rrsp_total: 0
+  };
+}
+
+function ddmmyyyyToIso(d, m, y) { return `${y}-${m}-${d}`; }
+
+// Consumes the page's reconstructed {left,right} line list and fills one paystub object.
+// Left column = EMPLOYER/EMPLOYEE/BENEFITS/PAY table/TAXES table.
+// Right column = PAY PERIOD/OTHER PAY-CONTRIBUTIONS/DEDUCTIONS/SUMMARY.
+// RBC-GRSP and Employee Health Insurance appear in BOTH "Other Pay/Contributions" and
+// "Deductions" with different values, so the right column needs section tracking to
+// avoid picking up the deduction-side number instead of the employer-contribution one.
+function extractFieldsFromLines(parsedLines) {
+  const data = blankStub();
+  let rightSection = null;
+  let sawEmployeeHeader = false;
+  let nameCaptured = false;
+
+  for (const { left, right } of parsedLines) {
+    const leftTrim = left.trim();
+    const rightTrim = right.trim();
+
+    // Employee name (left column, header + address block)
+    if (/^EMPLOYEE$/i.test(leftTrim)) { sawEmployeeHeader = true; }
+    else if (sawEmployeeHeader && !nameCaptured && leftTrim) {
+      data.employee_name = leftTrim;
+      nameCaptured = true;
+      sawEmployeeHeader = false;
+    }
+
+    // Right-column section tracking
+    if (/^OTHER\s+PAY\/CONTRIBUTIONS/i.test(rightTrim)) rightSection = 'otherPay';
+    else if (/^DEDUCTIONS\s+Current\s+YTD/i.test(rightTrim)) rightSection = 'deductions';
+    else if (/^SUMMARY\s+Current\s+YTD/i.test(rightTrim)) rightSection = 'summary';
+
+    if (rightTrim) {
+      const { label, numbers } = splitLabelAndNumbers(right);
+      const current = numbers.length >= 2 ? numbers[numbers.length - 2] : (numbers[0] || 0);
+      if (rightSection === 'otherPay') {
+        if (/^RBC\s*-?\s*GRSP$/i.test(label)) { data.rbc_company_contributions = current; data.employer_rrsp_total += current; }
+        else if (/^Critical\s+Illness\s*\(ROP\)$/i.test(label)) { data.ci_insurance_rop = current; }
+        if (numbers.length > 0 && label && !/^OTHER\s+PAY/i.test(label) && !/^NET\s+PAY/i.test(label)) data.employer_benefits_total += current;
+      } else if (rightSection === 'summary') {
+        if (/^Total\s+Pay$/i.test(label)) data.gross_income = current;
+      }
+    }
+
+    if (leftTrim) {
+      const { label, numbers } = splitLabelAndNumbers(left);
+      const current = numbers.length >= 2 ? numbers[numbers.length - 2] : (numbers[0] || 0);
+      if (/^(Stat Holiday Pay|Stat pay - average daily wage|Tier 1 - Statutory Holiday|Tier 3 - Statutory Holiday)$/i.test(label)) {
+        data.stat_holiday_pay = parseFloat((data.stat_holiday_pay + current).toFixed(2));
+      } else if (/^Vacation\s+Pay$/i.test(label)) data.vacation_paid = current;
+      else if (/^Commission$/i.test(label)) data.commission = current;
+      else if (/^Personal\s+Day$/i.test(label)) data.personal_day = current;
+      else if (/^Bonus$/i.test(label)) data.bonus = current;
+      else if (/^Other$/i.test(label)) data.other = current;
+      else if (/^Employment\s+Insurance$/i.test(label)) data.ei_employee = current;
+      else if (/^QC\s+Pension\s+Plan$/i.test(label)) data.qpp_employee = current;
+      else if (/^QC\s+Parental\s+Insurance\s+Plan$/i.test(label)) data.qpip_employee = current;
+    }
+
+    const pb = right.match(/Period Beginning\s+(\d{2})-(\d{2})-(\d{4})/i);
+    if (pb) data.pay_period_start = ddmmyyyyToIso(pb[1], pb[2], pb[3]);
+    const pe = right.match(/Period Ending:?\s+(\d{2})-(\d{2})-(\d{4})/i);
+    if (pe) data.pay_period_end = ddmmyyyyToIso(pe[1], pe[2], pe[3]);
+  }
+  return data;
+}
+
+async function parsePDFFile(file) {
+  const buf = await file.arrayBuffer();
+  const pdf = await pdfjsLib.getDocument({ data: buf }).promise;
+  const stubs = [];
+
+  for (let p = 1; p <= pdf.numPages; p++) {
+    const page = await pdf.getPage(p);
+    const viewport = page.getViewport({ scale: 1 });
+    const content = await page.getTextContent();
+    const items = content.items
+      .map(it => ({ text: it.str, x: it.transform[4], y: it.transform[5] }))
+      .filter(it => it.text.trim() !== '');
+
+    items.sort((a, b) => b.y - a.y);
+    const lineGroups = [];
+    let current = null;
+    for (const it of items) {
+      if (current && Math.abs(current.y - it.y) <= 3) current.items.push(it);
+      else { current = { y: it.y, items: [it] }; lineGroups.push(current); }
+    }
+
+    const halfWidth = viewport.width / 2;
+    const parsedLines = lineGroups.map(line => {
+      const left = line.items.filter(i => i.x < halfWidth).sort((a, b) => a.x - b.x).map(i => i.text).join(' ');
+      const right = line.items.filter(i => i.x >= halfWidth).sort((a, b) => a.x - b.x).map(i => i.text).join(' ');
+      return { left, right };
+    });
+
+    // A page with no "Pay Stub Detail" marker isn't a paystub page — skip it rather
+    // than emit a blank/garbage entry.
+    const hasMarker = parsedLines.some(l => /Pay Stub Detail/i.test(l.left) || /Pay Stub Detail/i.test(l.right));
+    if (!hasMarker) continue;
+
+    stubs.push(extractFieldsFromLines(parsedLines));
+  }
+  return stubs;
+}
+
+// ---- Upload handling ----
+const dropZone = document.getElementById('drop-zone');
+const fileInput = document.getElementById('file-input');
+dropZone.addEventListener('click', () => fileInput.click());
+dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('dragover'); });
+dropZone.addEventListener('dragleave', () => dropZone.classList.remove('dragover'));
+dropZone.addEventListener('drop', e => {
+  e.preventDefault(); dropZone.classList.remove('dragover');
+  if (e.dataTransfer.files.length) handleFiles([...e.dataTransfer.files]);
+});
+fileInput.addEventListener('change', () => { if (fileInput.files.length) handleFiles([...fileInput.files]); });
+
+let allStubs = [];
+
+async function handleFiles(files) {
+  const errEl = document.getElementById('error-msg');
+  const statusEl = document.getElementById('status-msg');
+  errEl.style.display = 'none';
+  const pdfFiles = files.filter(f => f.type === 'application/pdf' || f.name.toLowerCase().endsWith('.pdf'));
+  if (pdfFiles.length === 0) {
+    errEl.textContent = 'No PDF files found in what was dropped.';
+    errEl.style.display = 'block';
+    return;
+  }
+  document.getElementById('filename-display').textContent = pdfFiles.map(f => f.name).join(', ');
+  statusEl.textContent = 'Parsing ' + pdfFiles.length + ' file(s)…';
+
+  const newStubs = [];
+  const failedFiles = [];
+  for (const file of pdfFiles) {
+    try {
+      const stubs = await parsePDFFile(file);
+      if (stubs.length === 0) failedFiles.push(file.name + ' (no "Pay Stub Detail" page found)');
+      newStubs.push(...stubs);
+    } catch (e) {
+      failedFiles.push(file.name + ' (' + e.message + ')');
+    }
+  }
+
+  if (failedFiles.length > 0) {
+    errEl.textContent = 'Could not read: ' + failedFiles.join('; ');
+    errEl.style.display = 'block';
+  }
+
+  allStubs = allStubs.concat(newStubs);
+  statusEl.textContent = allStubs.length + ' paystub(s) loaded.';
+  render();
+}
+
+// ---- Validation ----
+function validateStub(stub, type, isMario, prevGrossForEmployee) {
+  const flags = [];
+  const gross = stub.gross_income || 0;
+  const das = stub.das_total || 0;
+
+  if (gross > 0) {
+    const ratio = das / gross;
+    if (ratio < 0.06 || ratio > 0.12) {
+      flags.push({ field: 'das_total', level: 'red', note: 'DAS looks wrong: ' + (ratio * 100).toFixed(1) + '% of gross. Expected 6–12%.' });
+    }
+  }
+  if ((stub.commission || 0) > 0 && (stub.personal_day || 0) > 0) {
+    flags.push({ field: 'commission', level: 'flag', note: 'Both commission and personal day are non-zero — please verify.' });
+  }
+  if (prevGrossForEmployee && prevGrossForEmployee > 0 && gross > 0) {
+    const change = Math.abs(gross - prevGrossForEmployee) / prevGrossForEmployee;
+    if (change > 0.75) {
+      flags.push({ field: 'gross_income', level: 'flag', note: 'Large change from this employee\u2019s other uploaded period: ' + prevGrossForEmployee.toFixed(2) + ' \u2192 ' + gross.toFixed(2) + ' (' + (change * 100).toFixed(0) + '%). Please verify.' });
+    }
+  }
+  return flags;
+}
+
+function fieldsToBlock(stub, type) {
+  const rows = ROW_ORDER[type];
+  const lines = [];
+  for (const row of rows) {
+    if (row.blank) { lines.push(''); continue; }
+    const v = stub[row.f] || 0;
+    lines.push(v.toFixed(2));
+  }
+  return lines.join('\n');
+}
+
+function render() {
+  const resultsEl = document.getElementById('results');
+  resultsEl.innerHTML = '';
+  if (allStubs.length === 0) return;
+
+  // Sort by employee then by period end, so within-batch swing comparisons make sense
+  const sorted = [...allStubs].sort((a, b) => {
+    if (a.employee_name !== b.employee_name) return a.employee_name.localeCompare(b.employee_name);
+    return (a.pay_period_end || '').localeCompare(b.pay_period_end || '');
+  });
+
+  // Duplicate check: same employee + same period end uploaded twice
+  const seen = new Map();
+  const duplicates = [];
+  for (const s of sorted) {
+    const key = s.employee_name + '|' + s.pay_period_end;
+    if (seen.has(key)) duplicates.push(s.employee_name + ' (' + s.pay_period_end + ')');
+    seen.set(key, true);
+  }
+  if (duplicates.length > 0) {
+    const dupEl = document.createElement('div');
+    dupEl.className = 'duplicate-warning';
+    dupEl.textContent = '⚠ Duplicate upload detected: ' + duplicates.join(', ') + '. Same employee and period appear more than once in this batch.';
+    resultsEl.appendChild(dupEl);
+  }
+
+  let prevGrossByEmployee = {};
+
+  sorted.forEach((stub, idx) => {
+    const type = detectType(stub.employee_name);
+    const isMario = isMarioName(stub.employee_name);
+    stub.das_total = calculateDAS(stub, isMario);
+
+    const prevGross = prevGrossByEmployee[stub.employee_name];
+    const flags = validateStub(stub, type, isMario, prevGross);
+    prevGrossByEmployee[stub.employee_name] = stub.gross_income;
+
+    const uid = 'stub' + idx;
+    const flagMap = {};
+    flags.forEach(f => { flagMap[f.field] = f; });
+
+    const card = document.createElement('div');
+    card.className = 'stub-card';
+
+    const fieldRow = (fieldKey, label) => {
+      const flag = flagMap[fieldKey];
+      const rowClass = flag ? (flag.level === 'red' ? 'flag-red' : 'flag-row') : '';
+      const val = stub[fieldKey] !== undefined ? stub[fieldKey] : 0;
+      return `<tr class="${rowClass}">
+        <td>${label}</td>
+        <td><input type="number" step="0.01" value="${val}" id="${uid}-${fieldKey}" oninput="onFieldEdit('${uid}','${fieldKey}',this.value)"></td>
+        ${flag ? `<td colspan="0"><span class="flag-note">${flag.note}</span></td>` : '<td></td>'}
+      </tr>`;
+    };
+
+    const otherWarning = (stub.other || 0) !== 0
+      ? `<div class="other-warning"><strong>⚠ "Other" pay detected: $${stub.other.toFixed(2)}</strong>This is a catch-all field — review the PDF and move it to the correct row manually before pasting.</div>`
+      : '';
+
+    card.innerHTML = `
+      <div class="stub-header">
+        <div>
+          <span class="stub-name">${stub.employee_name || '(name not found — check PDF)'}</span>
+          <span class="stub-type-badge">${type}</span>
+        </div>
+        <div class="stub-period">${stub.pay_period_start} → ${stub.pay_period_end}</div>
+      </div>
+      <div class="stub-body">
+        <div>
+          <table class="field-table">
+            <thead><tr><th>Field</th><th style="text-align:right">Value</th><th></th></tr></thead>
+            <tbody>
+              ${fieldRow('gross_income','Gross Income')}
+              ${fieldRow('stat_holiday_pay','Stat Holiday Pay')}
+              ${type!=='kathy'?fieldRow('personal_day','Personal Day'):''}
+              ${type!=='kathy'?fieldRow('bonus','Bonus'):''}
+              ${type!=='kathy'?fieldRow('commission','Commission'):''}
+              ${fieldRow('vacation_paid','Vacation Paid')}
+              ${fieldRow('das_total','DAS Total')}
+              ${type==='mario'?fieldRow('ci_insurance_rop','Critical Illness (ROP)'):''}
+              ${type==='regular'?fieldRow('rbc_company_contributions','RBC Company Contributions'):''}
+              ${fieldRow('other','Other (catch-all)')}
+            </tbody>
+          </table>
+          <p class="das-hint">DAS = QPP + QPIP×1.4 + EI×1.4 + Gross×1.65% ${isMario?'(CNESST excluded for Mario)':'+ Gross×0.833% CNESST'}, recalculates as you edit values above.</p>
+          ${otherWarning}
+        </div>
+        <div>
+          <div class="copy-block">
+            <div class="copy-block-title">
+              <span>Paste block — ${type} row order (${ROW_ORDER[type].length} rows incl. blank divider)</span>
+              <button class="copy-btn" id="${uid}-copybtn" onclick="copyBlock('${uid}')">Copy</button>
+            </div>
+            <textarea class="copy-paste" id="${uid}-block" readonly>${fieldsToBlock(stub, type)}</textarea>
+            <p class="copy-hint">Paste this as one vertical range starting at the Gross Income row for ${stub.employee_name || 'this employee'}'s column. Row order matches the sheet's ${type} block exactly, including the blank divider row.</p>
+          </div>
+        </div>
+      </div>`;
+    resultsEl.appendChild(card);
+
+    card.dataset.type = type;
+    card.dataset.isMario = isMario;
+    card._stub = stub;
+    card._uid = uid;
+  });
+
+  window._cardStubs = window._cardStubs || {};
+  document.querySelectorAll('.stub-card').forEach(c => { window._cardStubs[c._uid] = c; });
+}
+
+function onFieldEdit(uid, field, value) {
+  const card = window._cardStubs[uid];
+  if (!card) return;
+  const stub = card._stub;
+  const oldVal = stub[field] || 0;
+  const newVal = parseFloat(value) || 0;
+  const delta = newVal - oldVal;
+  stub[field] = newVal;
+  // rbc_company_contributions and ci_insurance_rop feed calculateDAS indirectly via
+  // employer_rrsp_total (CNESST base) and employer_benefits_total (HSF base) - adjust
+  // those by the same delta so a manual correction here actually changes the DAS total.
+  if (field === 'rbc_company_contributions') {
+    stub.employer_rrsp_total = (stub.employer_rrsp_total || 0) + delta;
+    stub.employer_benefits_total = (stub.employer_benefits_total || 0) + delta;
+  } else if (field === 'ci_insurance_rop') {
+    stub.employer_benefits_total = (stub.employer_benefits_total || 0) + delta;
+  }
+  const isMario = card.dataset.isMario === 'true';
+  stub.das_total = calculateDAS(stub, isMario);
+  const dasInput = document.getElementById(uid + '-das_total');
+  if (dasInput) dasInput.value = stub.das_total;
+  const block = document.getElementById(uid + '-block');
+  if (block) block.value = fieldsToBlock(stub, card.dataset.type);
+}
+
+function copyBlock(uid) {
+  const block = document.getElementById(uid + '-block');
+  const btn = document.getElementById(uid + '-copybtn');
+  navigator.clipboard.writeText(block.value).then(() => {
+    btn.textContent = 'Copied!';
+    btn.classList.add('copied');
+    setTimeout(() => { btn.textContent = 'Copy'; btn.classList.remove('copied'); }, 1800);
+  }).catch(() => {
+    block.select();
+    document.execCommand('copy');
+    btn.textContent = 'Copied!';
+    setTimeout(() => { btn.textContent = 'Copy'; }, 1800);
+  });
+}
+</script>
+</body>
+</html>
