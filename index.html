@@ -348,6 +348,49 @@ function getQuarterKey(dateStr) {
 // applied regardless of when CEU was actually paid, since it's a flat annual entitlement
 // rather than something earned in a specific period. ceu_benefit is the raw $ actually
 // paid this period, if any, purely so you can see when it happened.
+// When two+ stubs share the exact same employee + pay period, there's no ambiguity about
+// where they belong - unlike a correction landing on a DIFFERENT date, which the tool
+// can't safely guess how to combine. If the stubs' key figures actually differ, they're
+// genuinely separate paycheques for that period (e.g. a normal run + a same-period
+// correction for missed vacation pay) and get summed into one. If the figures are
+// identical, it's much more likely the same PDF got uploaded twice by accident - keep
+// only one and say so, rather than silently doubling someone's pay.
+const SUMMABLE_FIELDS = ['gross_income','stat_holiday_pay','personal_day','bonus','commission',
+  'vacation_paid','other','ei_employee','qpp_employee','qpip_employee','ci_insurance_rop',
+  'rbc_company_contributions','health_insurance_er','employer_benefits_total','employer_rrsp_total'];
+
+function mergeSamePeriodStubs(sortedStubs) {
+  const groups = {};
+  const order = [];
+  for (const stub of sortedStubs) {
+    const key = `${stub.employee_name}|${stub.pay_period_start}|${stub.pay_period_end}`;
+    if (!groups[key]) { groups[key] = []; order.push(key); }
+    groups[key].push(stub);
+  }
+
+  const merged = [];
+  const notices = [];
+  for (const key of order) {
+    const group = groups[key];
+    if (group.length === 1) { merged.push(group[0]); continue; }
+
+    const identical = group.every(s => Math.abs((s.gross_income || 0) - (group[0].gross_income || 0)) < 0.01
+      && Math.abs((s.vacation_paid || 0) - (group[0].vacation_paid || 0)) < 0.01);
+
+    if (identical) {
+      merged.push(group[0]);
+      notices.push({ type: 'duplicate', employee: group[0].employee_name, period: group[0].pay_period_end, count: group.length });
+    } else {
+      const combined = Object.assign({}, group[0]);
+      for (const f of SUMMABLE_FIELDS) combined[f] = group.reduce((sum, s) => sum + (s[f] || 0), 0);
+      combined.gross_income_ytd = Math.max(...group.map(s => s.gross_income_ytd || 0));
+      merged.push(combined);
+      notices.push({ type: 'merged', employee: group[0].employee_name, period: group[0].pay_period_end, count: group.length });
+    }
+  }
+  return { merged, notices };
+}
+
 function applySmoothingAndCeu(sortedStubs) {
   const byEmployee = {};
   for (const stub of sortedStubs) {
@@ -1046,26 +1089,48 @@ function render() {
   if (allStubs.length === 0) return;
 
   // Sort by employee then by period end, so within-batch swing comparisons make sense
-  const sorted = [...allStubs].sort((a, b) => {
+  const sortedRaw = [...allStubs].sort((a, b) => {
     if (a.employee_name !== b.employee_name) return a.employee_name.localeCompare(b.employee_name);
     return (a.pay_period_end || '').localeCompare(b.pay_period_end || '');
   });
 
+  const { merged: sorted, notices } = mergeSamePeriodStubs(sortedRaw);
+
   applySmoothingAndCeu(sorted);
 
-  // Duplicate check: same employee + same period end uploaded twice
-  const seen = new Map();
-  const duplicates = [];
-  for (const s of sorted) {
-    const key = s.employee_name + '|' + s.pay_period_end;
-    if (seen.has(key)) duplicates.push(s.employee_name + ' (' + s.pay_period_end + ')');
-    seen.set(key, true);
-  }
-  if (duplicates.length > 0) {
+  const duplicateNotices = notices.filter(n => n.type === 'duplicate');
+  if (duplicateNotices.length > 0) {
     const dupEl = document.createElement('div');
     dupEl.className = 'duplicate-warning';
-    dupEl.textContent = '⚠ Duplicate upload detected: ' + duplicates.join(', ') + '. Same employee and period appear more than once in this batch.';
+    dupEl.textContent = '⚠ Duplicate upload detected: ' + duplicateNotices.map(n => `${n.employee} (${n.period})`).join(', ') + '. Same employee, period, and figures appear more than once - kept one copy.';
     resultsEl.appendChild(dupEl);
+  }
+
+  const mergedNotices = notices.filter(n => n.type === 'merged');
+  if (mergedNotices.length > 0) {
+    const mergeEl = document.createElement('div');
+    mergeEl.className = 'swing-warning';
+    mergeEl.textContent = '\u2139 Combined multiple paycheques for the same period: ' + mergedNotices.map(n => `${n.employee} (${n.period}, ${n.count} paycheques summed)`).join(', ') + '.';
+    resultsEl.appendChild(mergeEl);
+  }
+
+  // Flag 3+ DISTINCT periods for one employee in the same calendar month - likely an
+  // off-cycle correction landing on its own separate date (not the same period as an
+  // existing one, which mergeSamePeriodStubs already handled above). The sheet only has
+  // 2 columns per month, so this still needs manual combining into the right column.
+  const byEmployeeMonth = {};
+  for (const s of sorted) {
+    if (!s.employee_name || !s.pay_period_end) continue;
+    const monthKey = s.employee_name + '|' + s.pay_period_end.slice(0, 7);
+    (byEmployeeMonth[monthKey] = byEmployeeMonth[monthKey] || []).push(s.pay_period_end);
+  }
+  const extraPayrolls = Object.entries(byEmployeeMonth).filter(([k, dates]) => dates.length >= 3);
+  if (extraPayrolls.length > 0) {
+    const note = extraPayrolls.map(([k, dates]) => `${k.split('|')[0]} (${dates.length} distinct periods in ${k.split('|')[1]})`).join(', ');
+    const extraEl = document.createElement('div');
+    extraEl.className = 'swing-warning';
+    extraEl.textContent = `⚠ 3+ distinct pay periods in one month: ${note}. Likely an off-cycle correction on its own date - combine into the right period column manually before pasting, since the sheet only has 2 columns per month.`;
+    resultsEl.appendChild(extraEl);
   }
 
   let prevGrossByEmployee = {};
