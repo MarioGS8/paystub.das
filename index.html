@@ -705,7 +705,7 @@ function renderTrackerSummary() {
   if (!el) return;
   const today = new Date().toISOString().slice(0, 10);
   const names = new Set([...Object.keys(EMPLOYEE_ROSTER), ...PERSONAL_DAY_LOG.map(e=>e.employee), ...CEU_LOG.map(e=>e.employee)]);
-  let html = '<table class="rates-table"><thead><tr><th>Employee</th><th>Personal days used</th><th>CEU used</th></tr></thead><tbody>';
+  let html = '<table class="rates-table"><thead><tr><th>Employee</th><th>Personal days used</th><th>CEU entries this year</th></tr></thead><tbody>';
   for (const name of names) {
     const roster = getRosterEntry(name);
     if (roster.eligible === false) {
@@ -714,14 +714,15 @@ function renderTrackerSummary() {
     }
     const window = roster.startDate ? getEmploymentYearWindow(roster.startDate, today) : null;
     const pdUsed = PERSONAL_DAY_LOG.filter(e => e.employee === name && (!window || (e.period >= window.start && e.period <= window.end))).length;
-    const ceuUsed = CEU_LOG.filter(e => e.employee === name && (!window || (e.date >= window.start && e.date <= window.end))).reduce((s,e)=>s+(parseFloat(e.amount)||0), 0);
     const pdOver = pdUsed > PERSONAL_DAY_CAP;
-    const ceuOver = ceuUsed > CEU_CAP;
+    const ceuEntries = CEU_LOG.filter(e => e.employee === name && (!window || (e.date >= window.start && e.date <= window.end))).sort((a,b)=>a.date.localeCompare(b.date));
+    const ceuMultiple = ceuEntries.length >= 2;
     const windowNote = window ? `${window.start} to ${window.end}` : 'no start date set';
+    const ceuDatesNote = ceuEntries.length > 0 ? ceuEntries.map(e=>e.date).join(', ') : 'none logged';
     html += `<tr>
       <td>${name}<div style="font-size:11px;color:#5f5e5a">${windowNote}</div></td>
       <td style="color:${pdOver?'#a32d2d':'#1a1a18'};font-weight:${pdOver?'600':'400'}">${pdUsed} / ${PERSONAL_DAY_CAP}${pdOver?' \u26a0 OVER':''}</td>
-      <td style="color:${ceuOver?'#a32d2d':'#1a1a18'};font-weight:${ceuOver?'600':'400'}">$${ceuUsed.toFixed(2)} / $${CEU_CAP}${ceuOver?' \u26a0 OVER':''}</td>
+      <td style="color:${ceuMultiple?'#ba7517':'#1a1a18'};font-weight:${ceuMultiple?'600':'400'}">${ceuEntries.length}${ceuMultiple?' \u26a0 MULTIPLE':''}<div style="font-size:11px;color:#5f5e5a;font-weight:400">${ceuDatesNote}</div></td>
     </tr>`;
   }
   html += '</tbody></table>';
@@ -758,7 +759,7 @@ function applyTrackerLogs() {
     const employee = inputs[0].value.trim();
     const date = inputs[1].value;
     const amount = parseFloat(inputs[2].value) || 0;
-    if (employee && date && amount > 0) CEU_LOG.push({ employee, date, amount });
+    if (employee && date) CEU_LOG.push({ employee, date, amount });
   }
   const currentStubs = Object.values(window._cardStubs || {}).map(c => c._stub).filter(Boolean);
   if (currentStubs.length) applySmoothingAndCeu(currentStubs);
