@@ -55,12 +55,140 @@
   .other-warning strong { display:block; margin-bottom:2px; }
   .duplicate-warning { background: #fcebeb; border-radius: 8px; padding: 10px 14px; font-size: 12px; color: #a32d2d; margin-bottom: 1rem; }
   .swing-warning { background: #faeeda; border-radius: 8px; padding: 10px 14px; font-size: 12px; color: #854f0b; margin-bottom: 1rem; }
+
+  .card-title-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem; }
+  .settings-toggle { font-size: 13px; color: #5f5e5a; cursor: pointer; background: none; border: 0.5px solid rgba(0,0,0,0.15); border-radius: 6px; padding: 5px 12px; }
+  .settings-toggle:hover { background: #f5f5f3; }
+  .settings-section { display: none; margin-top: 1rem; }
+  .settings-section.open { display: block; }
+  .rates-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  .rates-table th { text-align: left; color: #5f5e5a; font-weight: 500; padding: 6px 8px 10px; border-bottom: 0.5px solid rgba(0,0,0,0.12); font-size: 12px; }
+  .rates-table td { padding: 8px 8px 8px 0; border-bottom: 0.5px solid rgba(0,0,0,0.05); vertical-align: middle; }
+  .rates-table tr:last-child td { border-bottom: none; }
+  .rates-table input[type="number"] { width: 90px; padding: 5px 7px; border: 0.5px solid rgba(0,0,0,0.15); border-radius: 6px; font-size: 13px; background: #fffde7; text-align: right; }
+  .rates-table input:focus { outline: none; border-color: rgba(0,0,0,0.35); }
+  .save-btn { padding: 7px 16px; background: #1a1a18; color: #fff; border: none; border-radius: 7px; font-size: 13px; cursor: pointer; }
+  .save-btn:hover { opacity: 0.85; }
+  .save-confirm { font-size: 12px; color: #3b6d11; opacity: 0; transition: opacity 0.3s; }
+  .save-confirm.show { opacity: 1; }
 </style>
 </head>
 <body>
 <div class="container">
   <h1>Paystub extractor</h1>
   <p class="subtitle">Activ Axion · QuickBooks paystub PDF → Employee Costs sheet values, no API calls</p>
+
+  <div class="card">
+    <div class="card-title-row">
+      <div class="card-title" style="margin-bottom:0">DAS calculation rates</div>
+      <button class="settings-toggle" onclick="toggleRates()">Edit rates</button>
+    </div>
+    <p style="font-size:13px;color:#5f5e5a;">These feed every DAS total below. Double-check them here whenever QBO, CNESST, or Revenu Qu&eacute;bec updates a rate &mdash; nothing else in this tool assumes they're current.</p>
+    <div class="settings-section" id="rates-section">
+      <table class="rates-table">
+        <thead><tr><th>Rate</th><th>Value</th><th>Basis</th></tr></thead>
+        <tbody>
+          <tr>
+            <td>QC Health Services Fund (HSF)</td>
+            <td><input type="number" id="rate-hsf" step="0.0001" value="1.65"> %</td>
+            <td style="font-size:12px;color:#5f5e5a">Applied to gross + all employer-paid benefits</td>
+          </tr>
+          <tr>
+            <td>CNESST (workers' comp)</td>
+            <td><input type="number" id="rate-cnesst" step="0.0001" value="0.83"> %</td>
+            <td style="font-size:12px;color:#5f5e5a">Applied to gross + employer RRSP match only. Use the periodic remittance rate, not the indicative "taux de prime".</td>
+          </tr>
+          <tr>
+            <td>EI employer multiplier</td>
+            <td><input type="number" id="rate-ei-mult" step="0.01" value="1.4"> &times;</td>
+            <td style="font-size:12px;color:#5f5e5a">Applied to employee EI deduction</td>
+          </tr>
+          <tr>
+            <td>QPIP employer multiplier</td>
+            <td><input type="number" id="rate-qpip-mult" step="0.01" value="1.4"> &times;</td>
+            <td style="font-size:12px;color:#5f5e5a">Applied to employee QPIP deduction</td>
+          </tr>
+          <tr>
+            <td>CNESST Labour Standards</td>
+            <td><input type="number" id="rate-labour-standards" step="0.001" value="0.06"> %</td>
+            <td style="font-size:12px;color:#5f5e5a">Separate from CNESST workers' comp above. Applied to gross, capped at the YTD threshold below per employee per year.</td>
+          </tr>
+          <tr>
+            <td>Labour Standards YTD cap</td>
+            <td><input type="number" id="rate-labour-standards-cap" step="1000" value="103000"></td>
+            <td style="font-size:12px;color:#5f5e5a">2026 threshold. Contribution drops to $0 once an employee's YTD gross crosses this for the year.</td>
+          </tr>
+        </tbody>
+      </table>
+      <div style="display:flex;align-items:center;gap:10px;margin-top:1rem;flex-wrap:wrap">
+        <button class="save-btn" onclick="applyRates()">Apply &amp; recalculate</button>
+        <button class="save-btn" style="background:none;color:#1a1a18;border:0.5px solid rgba(0,0,0,0.2)" onclick="saveRatesFile()">Save rates to file</button>
+        <label style="padding:7px 14px;background:none;border:0.5px solid rgba(0,0,0,0.2);border-radius:7px;font-size:13px;cursor:pointer;color:#1a1a18" onmouseover="this.style.background='#f5f5f3'" onmouseout="this.style.background='none'">
+          Load rates from file<input type="file" id="rates-file-input" accept=".json" style="display:none" onchange="loadRatesFile(this)">
+        </label>
+        <span class="save-confirm" id="rates-confirm">Applied</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-title-row">
+      <div class="card-title" style="margin-bottom:0">Employee roster</div>
+      <button class="settings-toggle" onclick="toggleVacationRates()">Edit</button>
+    </div>
+    <p style="font-size:13px;color:#5f5e5a;">Start date sets each employee's anniversary year, used for the personal-day and CEU limits below. Vacation rate: 4% under 3 years of service, 6% at 3+ years per Quebec labour standards &mdash; update it yourself as people cross the mark, the tool won't detect it automatically.</p>
+    <div class="settings-section" id="vacation-rates-section">
+      <table class="rates-table" id="vacation-rates-table">
+        <thead><tr><th>Employee</th><th>Start date</th><th>Vacation rate</th></tr></thead>
+        <tbody id="vacation-rates-tbody"></tbody>
+      </table>
+      <div style="display:flex;align-items:center;gap:10px;margin-top:1rem;flex-wrap:wrap">
+        <button class="save-btn" onclick="applyVacationRates()">Apply &amp; recalculate</button>
+        <button class="save-btn" style="background:none;color:#1a1a18;border:0.5px solid rgba(0,0,0,0.2)" onclick="saveVacationRatesFile()">Save to file</button>
+        <label style="padding:7px 14px;background:none;border:0.5px solid rgba(0,0,0,0.2);border-radius:7px;font-size:13px;cursor:pointer;color:#1a1a18" onmouseover="this.style.background='#f5f5f3'" onmouseout="this.style.background='none'">
+          Load from file<input type="file" id="vacation-rates-file-input" accept=".json" style="display:none" onchange="loadVacationRatesFile(this)">
+        </label>
+        <span class="save-confirm" id="vacation-rates-confirm">Applied</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-title-row">
+      <div class="card-title" style="margin-bottom:0">Personal days &amp; CEU tracker</div>
+      <button class="settings-toggle" onclick="toggleTracker()">Edit CEU log</button>
+    </div>
+    <p style="font-size:13px;color:#5f5e5a;">2 personal days per employment year (each paystub with a non-zero Personal Day counts as 1 day used &mdash; not prorated by dollar amount). $500 CEU per employment year. Personal days are logged automatically as paystubs are processed below; CEU never appears on a paystub, so log it manually here.</p>
+    <div id="tracker-summary"></div>
+    <div class="settings-section" id="tracker-section">
+      <table class="rates-table" id="ceu-log-table">
+        <thead><tr><th>Employee</th><th>Date</th><th>Amount ($)</th><th></th></tr></thead>
+        <tbody id="ceu-log-tbody"></tbody>
+      </table>
+      <button class="add-row-btn" onclick="addCeuRow()">+ Add CEU entry</button>
+      <div style="display:flex;align-items:center;gap:10px;margin-top:1rem;flex-wrap:wrap">
+        <button class="save-btn" onclick="applyTrackerLogs()">Apply &amp; recalculate</button>
+        <button class="save-btn" style="background:none;color:#1a1a18;border:0.5px solid rgba(0,0,0,0.2)" onclick="saveTrackerFile()">Save log to file</button>
+        <label style="padding:7px 14px;background:none;border:0.5px solid rgba(0,0,0,0.2);border-radius:7px;font-size:13px;cursor:pointer;color:#1a1a18" onmouseover="this.style.background='#f5f5f3'" onmouseout="this.style.background='none'">
+          Load log from file<input type="file" id="tracker-file-input" accept=".json" style="display:none" onchange="loadTrackerFile(this)">
+        </label>
+        <span class="save-confirm" id="tracker-confirm">Applied</span>
+      </div>
+      <p style="font-size:12px;color:#5f5e5a;margin-top:0.75rem">Save this log to file after every session and reload it next time &mdash; personal days and CEU need to accumulate across an entire employment year, not just this upload batch.</p>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-title">Master ledger (optional)</div>
+    <p style="font-size:13px;color:#5f5e5a;margin-bottom:1rem;">Attach your "Employees Costs" workbook to seed personal-day history and prior-period gross before processing new paystubs. This makes the CNESST Labour Standards $103K cap check more reliable than trusting a single paystub's own YTD figure, and backfills personal days you haven't logged yet. No CEU data exists in this workbook currently &mdash; that stays manual entry below.</p>
+    <div class="upload-zone" id="ledger-drop-zone">
+      <p>📊 Drop your Employees Costs workbook here or click to browse</p>
+      <div class="filename" id="ledger-filename-display"></div>
+    </div>
+    <input type="file" id="ledger-file-input" accept=".xlsx,.xlsm">
+    <div class="status-msg" id="ledger-status-msg"></div>
+    <div class="error-msg" id="ledger-error-msg" style="display:none"></div>
+  </div>
 
   <div class="card">
     <div class="card-title">Upload paystubs</div>
@@ -78,12 +206,19 @@
 </div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script>
 pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
 
-// ---- Constants ported from the Apps Script (calculateDAS, employee lookup) ----
-const HSF_RATE = 0.0165;
-const CNESST_RATE = 0.0083; // periodic remittance rate per CNESST classification decision, NOT the indicative "taux de prime" (0.833%)
+// ---- Rates used in the DAS calculation. Editable via the panel below so they can be
+// double-checked against QBO/CNESST/Revenu Quebec whenever those rates change. ----
+let HSF_RATE = 0.0165;
+let CNESST_RATE = 0.0083; // periodic remittance rate per CNESST classification decision, NOT the indicative "taux de prime" (0.833%)
+let EI_EMPLOYER_MULTIPLIER = 1.4;
+let QPIP_EMPLOYER_MULTIPLIER = 1.4;
+let VACATION_ACCRUAL_RATE = 0.04; // 4% under 3 years of service, 6% at 3+ years per Quebec labour standards
+let LABOUR_STANDARDS_RATE = 0.0006; // CNESST "Contribution Related to Labour Standards", 0.06% for 2026
+let LABOUR_STANDARDS_CAP = 103000; // max YTD remuneration per employee subject to the contribution, 2026
 
 // Employee-type lookup: which sheet block layout this employee uses.
 // Matched by substring against the lowercased extracted name, same approach as the
@@ -107,11 +242,147 @@ function isMarioName(name) {
 // Row order per employee type, matching the Apps Script's fieldRowMap offsets exactly
 // (including the blank row 8 gap before the CI/RBC row at offset 9). This is what makes
 // the copy-paste block line up with the actual sheet columns.
-const ROW_ORDER = {
-  kathy:   [ {f:'gross_income',label:'Gross Income'}, {f:'stat_holiday_pay',label:'Stat Holiday Pay'}, {f:'vacation_paid',label:'Vacation Paid'}, {f:'das_total',label:'DAS Total'} ],
-  mario:   [ {f:'gross_income',label:'Gross Income'}, {f:'stat_holiday_pay',label:'Stat Holiday Pay'}, {f:'personal_day',label:'Personal Day'}, {f:'bonus',label:'Bonus'}, {f:'commission',label:'Commission'}, {f:'vacation_paid',label:'Vacation Paid'}, {f:'das_total',label:'DAS Total'}, {blank:true}, {f:'ci_insurance_rop',label:'Critical Illness (ROP)'} ],
-  regular: [ {f:'gross_income',label:'Gross Income'}, {f:'stat_holiday_pay',label:'Stat Holiday Pay'}, {f:'personal_day',label:'Personal Day'}, {f:'bonus',label:'Bonus'}, {f:'commission',label:'Commission'}, {f:'vacation_paid',label:'Vacation Paid'}, {f:'das_total',label:'DAS Total'}, {blank:true}, {f:'rbc_company_contributions',label:'RBC Company Contributions'} ],
+// Row order lived here, matching a blank-divider layout the sheet used to have. Your
+// actual current sheet (confirmed from the ledger file) matches COST_ROW_ORDER below
+// exactly - no blank divider, and it includes Group Health Insurance ER, Accrued
+// Vacation, and CNESST LS as real rows. That one is now the single source of truth.
+
+// Roster: start date (sets each employee's anniversary year for personal-day/CEU limits)
+// plus vacation accrual rate. Start dates are placeholders until the real ones are
+// provided - anything still '2025-01-01' hasn't been confirmed yet.
+let EMPLOYEE_ROSTER = {
+  'Mario Starnino': { startDate: '2023-01-01', vacationRate: 0.06 }, // fixed at 3wks/6% regardless of tenure per owner decision; year anchored to Jan 1
+  'Alexis Boosamra': { startDate: '2023-12-01', vacationRate: 0.04 }, // confirmed - 3yr mark ~Dec 2026
+  'Katherine Campeau': { startDate: '2025-01-01', vacationRate: 0.04, eligible: false }, // no personal days or CEU - excluded from tracker
+  'Jordan Katsoulis': { startDate: '2024-09-15', vacationRate: 0.04 }, // vacation-entitlement date per contract recognition clause (effective date was 2025-08-01)
+  'Gabrielle Khreiche': { startDate: '2024-11-15', vacationRate: 0.04 }, // vacation-entitlement date per contract recognition clause (effective date was 2025-08-01)
+  'Grace Lewis': { startDate: '2025-07-07', vacationRate: 0.04 }, // confirmed, no recognition clause in contract
+  'Ryle Justin Hernandez': { startDate: '2025-07-07', vacationRate: 0.04 }, // confirmed, no recognition clause in contract
 };
+
+function getRosterEntry(employeeName) {
+  if (employeeName && EMPLOYEE_ROSTER.hasOwnProperty(employeeName)) {
+    const entry = EMPLOYEE_ROSTER[employeeName];
+    return { eligible: true, ...entry };
+  }
+  return { startDate: null, vacationRate: VACATION_ACCRUAL_RATE, eligible: true };
+}
+function getVacationRateFor(employeeName) {
+  return getRosterEntry(employeeName).vacationRate;
+}
+
+// Given an employee's start date and any date within their current employment year,
+// returns the [start, end] window of the anniversary year that CONTAINS asOf. E.g. start
+// 2025-08-01, asOf 2026-07-13 -> window is 2025-08-01 to 2026-07-31 (not yet reached the
+// 2026-08-01 anniversary, so still in the year that began the previous August).
+function getEmploymentYearWindow(startDateStr, asOfDateStr) {
+  if (!startDateStr || !asOfDateStr) return null;
+  const start = new Date(startDateStr + 'T00:00:00');
+  const asOf = new Date(asOfDateStr + 'T00:00:00');
+  const anniv = new Date(asOf.getFullYear(), start.getMonth(), start.getDate());
+  let windowStart;
+  if (anniv <= asOf) windowStart = anniv;
+  else windowStart = new Date(asOf.getFullYear() - 1, start.getMonth(), start.getDate());
+  const windowEnd = new Date(windowStart.getFullYear() + 1, windowStart.getMonth(), windowStart.getDate() - 1);
+  const iso = d => d.toISOString().slice(0, 10);
+  return { start: iso(windowStart), end: iso(windowEnd) };
+}
+
+// Per your own accrual method (Gross - Vacation Paid) x rate - not the paystub's own
+// "Vacation $ Accrued" figure, which you've found QBO computes incorrectly (possibly an
+// Ontario-default carried into the Quebec setup).
+function calculateAccruedVacation(data) {
+  const rate = getVacationRateFor(data.employee_name);
+  return Math.round(((data.gross_income || 0) - (data.vacation_paid || 0)) * rate * 100) / 100;
+}
+
+// Cross-period gross history, seeded from the master ledger (if uploaded) and updated
+// as paystubs are processed this session. Used to compute YTD-before-this-period more
+// reliably than trusting a single paystub's own printed YTD figure, which QBO may not
+// keep perfectly (same category of issue as the vacation-accrual bug).
+let GROSS_HISTORY = {}; // { employeeName: { 'YYYY-MM-DD': grossAmount } }
+
+function recordGrossHistory(employee, periodEnd, gross) {
+  if (!employee || !periodEnd) return;
+  if (!GROSS_HISTORY[employee]) GROSS_HISTORY[employee] = {};
+  GROSS_HISTORY[employee][periodEnd] = gross;
+}
+
+function getYtdBefore(employee, periodEnd, fallbackYtdTotal, fallbackGross) {
+  const hist = GROSS_HISTORY[employee];
+  if (hist && Object.keys(hist).length > 0 && periodEnd) {
+    const year = periodEnd.slice(0, 4);
+    let sum = 0;
+    for (const [d, g] of Object.entries(hist)) {
+      if (d.slice(0, 4) === year && d < periodEnd) sum += (g || 0);
+    }
+    return sum;
+  }
+  return (fallbackYtdTotal || fallbackGross || 0) - (fallbackGross || 0);
+}
+
+// CNESST Labour Standards contribution, capped at LABOUR_STANDARDS_CAP of YTD remuneration
+// per employee for the year. Prefers GROSS_HISTORY (ledger + session data) over the
+// paystub's own YTD-Total-Pay figure when history is available, since that's more
+// auditable and doesn't depend on QBO's own running total being correct.
+function calculateLabourStandards(data) {
+  const gross = data.gross_income || 0;
+  const ytdBefore = getYtdBefore(data.employee_name, data.pay_period_end, data.gross_income_ytd, gross);
+  if (ytdBefore >= LABOUR_STANDARDS_CAP) return 0;
+  const eligible = Math.min(gross, LABOUR_STANDARDS_CAP - ytdBefore);
+  return Math.round(eligible * LABOUR_STANDARDS_RATE * 100) / 100;
+}
+
+function getQuarterKey(dateStr) {
+  if (!dateStr) return null;
+  const year = dateStr.slice(0, 4);
+  const month = parseInt(dateStr.slice(5, 7), 10);
+  const q = Math.ceil(month / 3);
+  return `${year}-Q${q}`;
+}
+
+// Bonus is paid once per quarter (lump sum, typically only the quarter's last paystub
+// shows a non-zero amount). Smoothing spreads that lump sum evenly across the 6 bi-monthly
+// pay periods in the quarter (3 months x 2 periods/month), so cost tracking sees the bonus
+// as accrued gradually rather than lumpy. CEU smoothing is a flat $500/12/2 per period,
+// applied regardless of when CEU was actually paid, since it's a flat annual entitlement
+// rather than something earned in a specific period. ceu_benefit is the raw $ actually
+// paid this period, if any, purely so you can see when it happened.
+function applySmoothingAndCeu(sortedStubs) {
+  const byEmployee = {};
+  for (const stub of sortedStubs) {
+    if (!stub.employee_name) continue;
+    (byEmployee[stub.employee_name] = byEmployee[stub.employee_name] || []).push(stub);
+  }
+
+  for (const [employee, stubs] of Object.entries(byEmployee)) {
+    const roster = getRosterEntry(employee);
+    const type = detectType(employee);
+
+    if (type !== 'kathy') {
+      const byQuarter = {};
+      for (const stub of stubs) {
+        const q = getQuarterKey(stub.pay_period_end);
+        if (!q) continue;
+        (byQuarter[q] = byQuarter[q] || []).push(stub);
+      }
+      for (const quarterStubs of Object.values(byQuarter)) {
+        const quarterlyBonus = Math.max(...quarterStubs.map(s => s.bonus || 0));
+        const perPeriod = Math.round((quarterlyBonus / 6) * 100) / 100;
+        for (const stub of quarterStubs) stub.bonus_smoothing = perPeriod;
+      }
+    }
+
+    if (roster.eligible !== false) {
+      const perPeriodCeu = Math.round((500 / 24) * 100) / 100;
+      for (const stub of stubs) {
+        stub.ceu_smoothing = perPeriodCeu;
+        const match = CEU_LOG.find(e => e.employee === employee && stub.pay_period_start && stub.pay_period_end && e.date >= stub.pay_period_start && e.date <= stub.pay_period_end);
+        stub.ceu_benefit = match ? (parseFloat(match.amount) || 0) : 0;
+      }
+    }
+  }
+}
 
 function calculateDAS(data, isMario) {
   const qpp = data.qpp_employee || 0;
@@ -121,8 +392,8 @@ function calculateDAS(data, isMario) {
   const employerBenefitsTotal = data.employer_benefits_total || 0;
   const employerRRSP = data.employer_rrsp_total || 0;
   const qppEmployer = Math.round(qpp * 100) / 100;
-  const qpipEmployer = Math.round(qpip * 1.4 * 100) / 100;
-  const eiEmployer = Math.round(ei * 1.4 * 100) / 100;
+  const qpipEmployer = Math.round(qpip * QPIP_EMPLOYER_MULTIPLIER * 100) / 100;
+  const eiEmployer = Math.round(ei * EI_EMPLOYER_MULTIPLIER * 100) / 100;
   const hsfBase = gross + employerBenefitsTotal;
   const hsf = Math.round(hsfBase * HSF_RATE * 100) / 100;
   const cnesstBase = gross + employerRRSP;
@@ -156,10 +427,11 @@ function splitLabelAndNumbers(text) {
 function blankStub() {
   return {
     employee_name: '', pay_period_start: '', pay_period_end: '',
-    gross_income: 0, stat_holiday_pay: 0, personal_day: 0, bonus: 0, commission: 0,
+    gross_income: 0, gross_income_ytd: 0, stat_holiday_pay: 0, personal_day: 0, bonus: 0, commission: 0,
     vacation_paid: 0, other: 0, ei_employee: 0, qpp_employee: 0, qpip_employee: 0,
-    ci_insurance_rop: 0, rbc_company_contributions: 0,
-    employer_benefits_total: 0, employer_rrsp_total: 0
+    ci_insurance_rop: 0, rbc_company_contributions: 0, health_insurance_er: 0,
+    employer_benefits_total: 0, employer_rrsp_total: 0,
+    bonus_smoothing: 0, ceu_benefit: 0, ceu_smoothing: 0
   };
 }
 
@@ -202,7 +474,10 @@ function extractFieldsFromLines(parsedLines) {
         else if (/^Critical\s+Illness\s*\(ROP\)$/i.test(label)) { data.ci_insurance_rop = current; }
         if (numbers.length > 0 && label && !/^OTHER\s+PAY/i.test(label) && !/^NET\s+PAY/i.test(label)) data.employer_benefits_total += current;
       } else if (rightSection === 'summary') {
-        if (/^Total\s+Pay$/i.test(label)) data.gross_income = current;
+        if (/^Total\s+Pay$/i.test(label)) { data.gross_income = current; data.gross_income_ytd = numbers.length >= 2 ? numbers[numbers.length - 1] : current; }
+      }
+      if (rightSection === 'otherPay' && /^Employee\s+Health\s+Insurance$/i.test(label)) {
+        data.health_insurance_er = current;
       }
     }
 
@@ -267,6 +542,389 @@ async function parsePDFFile(file) {
   return stubs;
 }
 
+function toggleRates() {
+  const s = document.getElementById('rates-section');
+  s.classList.toggle('open');
+  document.querySelector('.settings-toggle').textContent = s.classList.contains('open') ? 'Close' : 'Edit rates';
+}
+
+function syncRateInputs() {
+  document.getElementById('rate-hsf').value = (HSF_RATE * 100).toString();
+  document.getElementById('rate-cnesst').value = (CNESST_RATE * 100).toString();
+  document.getElementById('rate-ei-mult').value = EI_EMPLOYER_MULTIPLIER.toString();
+  document.getElementById('rate-qpip-mult').value = QPIP_EMPLOYER_MULTIPLIER.toString();
+  document.getElementById('rate-vacation-accrual').value = (VACATION_ACCRUAL_RATE * 100).toString();
+  document.getElementById('rate-labour-standards').value = (LABOUR_STANDARDS_RATE * 100).toString();
+  document.getElementById('rate-labour-standards-cap').value = LABOUR_STANDARDS_CAP.toString();
+}
+
+function applyRates() {
+  HSF_RATE = (parseFloat(document.getElementById('rate-hsf').value) || 0) / 100;
+  CNESST_RATE = (parseFloat(document.getElementById('rate-cnesst').value) || 0) / 100;
+  EI_EMPLOYER_MULTIPLIER = parseFloat(document.getElementById('rate-ei-mult').value) || 0;
+  QPIP_EMPLOYER_MULTIPLIER = parseFloat(document.getElementById('rate-qpip-mult').value) || 0;
+  VACATION_ACCRUAL_RATE = (parseFloat(document.getElementById('rate-vacation-accrual').value) || 0) / 100;
+  LABOUR_STANDARDS_RATE = (parseFloat(document.getElementById('rate-labour-standards').value) || 0) / 100;
+  LABOUR_STANDARDS_CAP = parseFloat(document.getElementById('rate-labour-standards-cap').value) || 0;
+
+  // Recalculate every already-loaded stub with the new rates
+  document.querySelectorAll('.stub-card').forEach(card => {
+    const stub = card._stub;
+    if (!stub) return;
+    const isMario = card.dataset.isMario === 'true';
+    stub.das_total = calculateDAS(stub, isMario);
+    stub.accrued_vacation = calculateAccruedVacation(stub);
+    stub.labour_standards = calculateLabourStandards(stub);
+    const dasInput = document.getElementById(card._uid + '-das_total');
+    if (dasInput) dasInput.value = stub.das_total;
+    const costBlock = document.getElementById(card._uid + '-costblock');
+    if (costBlock) costBlock.value = fieldsToCostBlock(stub, card.dataset.type);
+  });
+
+  const conf = document.getElementById('rates-confirm');
+  conf.classList.add('show');
+  setTimeout(() => conf.classList.remove('show'), 1800);
+}
+
+function saveRatesFile() {
+  applyRates();
+  const rates = { HSF_RATE, CNESST_RATE, EI_EMPLOYER_MULTIPLIER, QPIP_EMPLOYER_MULTIPLIER, VACATION_ACCRUAL_RATE, LABOUR_STANDARDS_RATE, LABOUR_STANDARDS_CAP };
+  const blob = new Blob([JSON.stringify(rates, null, 2)], { type: 'application/json' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'das-rates.json';
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+
+function loadRatesFile(input) {
+  const file = input.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = e => {
+    try {
+      const rates = JSON.parse(e.target.result);
+      if (typeof rates.HSF_RATE === 'number') HSF_RATE = rates.HSF_RATE;
+      if (typeof rates.CNESST_RATE === 'number') CNESST_RATE = rates.CNESST_RATE;
+      if (typeof rates.EI_EMPLOYER_MULTIPLIER === 'number') EI_EMPLOYER_MULTIPLIER = rates.EI_EMPLOYER_MULTIPLIER;
+      if (typeof rates.QPIP_EMPLOYER_MULTIPLIER === 'number') QPIP_EMPLOYER_MULTIPLIER = rates.QPIP_EMPLOYER_MULTIPLIER;
+      if (typeof rates.VACATION_ACCRUAL_RATE === 'number') VACATION_ACCRUAL_RATE = rates.VACATION_ACCRUAL_RATE;
+      if (typeof rates.LABOUR_STANDARDS_RATE === 'number') LABOUR_STANDARDS_RATE = rates.LABOUR_STANDARDS_RATE;
+      if (typeof rates.LABOUR_STANDARDS_CAP === 'number') LABOUR_STANDARDS_CAP = rates.LABOUR_STANDARDS_CAP;
+      syncRateInputs();
+      applyRates();
+    } catch (err) { alert('Could not read rates file.'); }
+  };
+  reader.readAsText(file);
+}
+
+syncRateInputs();
+
+function buildVacationRatesTable() {
+  const tbody = document.getElementById('vacation-rates-tbody');
+  tbody.innerHTML = '';
+  for (const [name, entry] of Object.entries(EMPLOYEE_ROSTER)) {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `<td>${name}</td><td><input type="date" value="${entry.startDate||''}" data-employee="${name}" data-field="startDate"></td><td><input type="number" step="0.01" value="${(entry.vacationRate*100).toFixed(2)}" data-employee="${name}" data-field="vacationRate"> %</td>`;
+    tbody.appendChild(tr);
+  }
+}
+buildVacationRatesTable();
+
+function toggleVacationRates() {
+  const s = document.getElementById('vacation-rates-section');
+  s.classList.toggle('open');
+  document.querySelectorAll('.settings-toggle')[1].textContent = s.classList.contains('open') ? 'Close' : 'Edit';
+}
+
+function applyVacationRates() {
+  document.querySelectorAll('#vacation-rates-tbody input').forEach(input => {
+    const name = input.dataset.employee;
+    if (input.dataset.field === 'startDate') EMPLOYEE_ROSTER[name].startDate = input.value;
+    else EMPLOYEE_ROSTER[name].vacationRate = (parseFloat(input.value) || 0) / 100;
+  });
+  document.querySelectorAll('.stub-card').forEach(card => {
+    const stub = card._stub;
+    if (!stub) return;
+    stub.accrued_vacation = calculateAccruedVacation(stub);
+    const costBlock = document.getElementById(card._uid + '-costblock');
+    if (costBlock) costBlock.value = fieldsToCostBlock(stub, card.dataset.type);
+  });
+  renderTrackerSummary();
+  const conf = document.getElementById('vacation-rates-confirm');
+  conf.classList.add('show');
+  setTimeout(() => conf.classList.remove('show'), 1800);
+}
+
+function saveVacationRatesFile() {
+  applyVacationRates();
+  const blob = new Blob([JSON.stringify(EMPLOYEE_ROSTER, null, 2)], { type: 'application/json' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'employee-roster.json';
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+
+function loadVacationRatesFile(input) {
+  const file = input.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = e => {
+    try {
+      const roster = JSON.parse(e.target.result);
+      EMPLOYEE_ROSTER = roster;
+      buildVacationRatesTable();
+      applyVacationRates();
+    } catch (err) { alert('Could not read roster file.'); }
+  };
+  reader.readAsText(file);
+}
+
+// ---- Personal day & CEU tracking ----
+const PERSONAL_DAY_CAP = 2;   // per employment year
+const CEU_CAP = 500;          // dollars per employment year
+
+// Auto-populated from paystubs: each entry = one personal day used. Deduped by
+// employee+period so re-uploading the same paystub twice doesn't double-count.
+let PERSONAL_DAY_LOG = [];
+// Manually entered - CEU never appears on a paystub per your setup, it only lives in
+// the master DAS sheet.
+let CEU_LOG = [];
+
+function logPersonalDaysFromStubs(stubs) {
+  for (const stub of stubs) {
+    if (!stub.employee_name || !((stub.personal_day || 0) > 0)) continue;
+    const exists = PERSONAL_DAY_LOG.some(e => e.employee === stub.employee_name && e.period === stub.pay_period_end);
+    if (!exists) PERSONAL_DAY_LOG.push({ employee: stub.employee_name, period: stub.pay_period_end, amount: stub.personal_day });
+  }
+}
+
+function renderTrackerSummary() {
+  const el = document.getElementById('tracker-summary');
+  if (!el) return;
+  const today = new Date().toISOString().slice(0, 10);
+  const names = new Set([...Object.keys(EMPLOYEE_ROSTER), ...PERSONAL_DAY_LOG.map(e=>e.employee), ...CEU_LOG.map(e=>e.employee)]);
+  let html = '<table class="rates-table"><thead><tr><th>Employee</th><th>Personal days used</th><th>CEU used</th></tr></thead><tbody>';
+  for (const name of names) {
+    const roster = getRosterEntry(name);
+    if (roster.eligible === false) {
+      html += `<tr><td>${name}<div style="font-size:11px;color:#5f5e5a">not eligible for personal days or CEU</div></td><td>N/A</td><td>N/A</td></tr>`;
+      continue;
+    }
+    const window = roster.startDate ? getEmploymentYearWindow(roster.startDate, today) : null;
+    const pdUsed = PERSONAL_DAY_LOG.filter(e => e.employee === name && (!window || (e.period >= window.start && e.period <= window.end))).length;
+    const ceuUsed = CEU_LOG.filter(e => e.employee === name && (!window || (e.date >= window.start && e.date <= window.end))).reduce((s,e)=>s+(parseFloat(e.amount)||0), 0);
+    const pdOver = pdUsed > PERSONAL_DAY_CAP;
+    const ceuOver = ceuUsed > CEU_CAP;
+    const windowNote = window ? `${window.start} to ${window.end}` : 'no start date set';
+    html += `<tr>
+      <td>${name}<div style="font-size:11px;color:#5f5e5a">${windowNote}</div></td>
+      <td style="color:${pdOver?'#a32d2d':'#1a1a18'};font-weight:${pdOver?'600':'400'}">${pdUsed} / ${PERSONAL_DAY_CAP}${pdOver?' \u26a0 OVER':''}</td>
+      <td style="color:${ceuOver?'#a32d2d':'#1a1a18'};font-weight:${ceuOver?'600':'400'}">$${ceuUsed.toFixed(2)} / $${CEU_CAP}${ceuOver?' \u26a0 OVER':''}</td>
+    </tr>`;
+  }
+  html += '</tbody></table>';
+  el.innerHTML = html;
+}
+
+function buildCeuLogTable() {
+  const tbody = document.getElementById('ceu-log-tbody');
+  tbody.innerHTML = '';
+  CEU_LOG.forEach((entry, idx) => addCeuRow(entry.employee, entry.date, entry.amount, idx));
+}
+
+function addCeuRow(employee='', date='', amount='', idx=null) {
+  const tr = document.createElement('tr');
+  tr.dataset.idx = idx !== null ? idx : '';
+  tr.innerHTML = `
+    <td><input type="text" value="${employee}" placeholder="e.g. Alexis Boosamra" style="min-width:170px"></td>
+    <td><input type="date" value="${date}" style="min-width:130px;padding:5px 7px;border:0.5px solid rgba(0,0,0,0.15);border-radius:6px;font-size:13px;background:#fff;color:#1a1a18"></td>
+    <td><input type="number" value="${amount}" step="0.01" min="0" style="min-width:90px"></td>
+    <td><button class="del-btn" onclick="this.closest('tr').remove()">\u00d7</button></td>`;
+  document.getElementById('ceu-log-tbody').appendChild(tr);
+}
+
+function toggleTracker() {
+  const s = document.getElementById('tracker-section');
+  s.classList.toggle('open');
+  document.querySelectorAll('.settings-toggle')[2].textContent = s.classList.contains('open') ? 'Close' : 'Edit CEU log';
+}
+
+function applyTrackerLogs() {
+  CEU_LOG = [];
+  for (const row of document.querySelectorAll('#ceu-log-tbody tr')) {
+    const inputs = row.querySelectorAll('input');
+    const employee = inputs[0].value.trim();
+    const date = inputs[1].value;
+    const amount = parseFloat(inputs[2].value) || 0;
+    if (employee && date && amount > 0) CEU_LOG.push({ employee, date, amount });
+  }
+  const currentStubs = Object.values(window._cardStubs || {}).map(c => c._stub).filter(Boolean);
+  if (currentStubs.length) applySmoothingAndCeu(currentStubs);
+  document.querySelectorAll('.stub-card').forEach(card => {
+    const stub = card._stub;
+    if (!stub) return;
+    const costBlock = document.getElementById(card._uid + '-costblock');
+    if (costBlock) costBlock.value = fieldsToCostBlock(stub, card.dataset.type);
+  });
+  renderTrackerSummary();
+  const conf = document.getElementById('tracker-confirm');
+  conf.classList.add('show');
+  setTimeout(() => conf.classList.remove('show'), 1800);
+}
+
+function saveTrackerFile() {
+  applyTrackerLogs();
+  const blob = new Blob([JSON.stringify({ PERSONAL_DAY_LOG, CEU_LOG }, null, 2)], { type: 'application/json' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'personal-day-ceu-log.json';
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+
+function loadTrackerFile(input) {
+  const file = input.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = e => {
+    try {
+      const data = JSON.parse(e.target.result);
+      if (Array.isArray(data.PERSONAL_DAY_LOG)) PERSONAL_DAY_LOG = data.PERSONAL_DAY_LOG;
+      if (Array.isArray(data.CEU_LOG)) CEU_LOG = data.CEU_LOG;
+      buildCeuLogTable();
+      renderTrackerSummary();
+    } catch (err) { alert('Could not read tracker log file.'); }
+  };
+  reader.readAsText(file);
+}
+renderTrackerSummary();
+
+function logGrossHistoryFromStubs(stubs) {
+  for (const stub of stubs) {
+    if (stub.employee_name && stub.pay_period_end) recordGrossHistory(stub.employee_name, stub.pay_period_end, stub.gross_income);
+  }
+}
+
+// Field labels this ledger's row structure uses (matches COST_ROW_ORDER exactly, confirmed
+// against the real workbook). Any column-A cell NOT in this set is treated as a new
+// employee name starting a fresh block, since that's how the sheet is actually laid out.
+function normalizeLabel(s) {
+  return (s || '').toString().toLowerCase().replace(/\s+/g, '');
+}
+
+function getLedgerFieldLabels() {
+  return new Set(
+    [].concat(COST_ROW_ORDER.regular, COST_ROW_ORDER.mario, COST_ROW_ORDER.kathy).map(r => normalizeLabel(r.label))
+  );
+}
+
+function ledgerIsoDate(d) {
+  if (!(d instanceof Date) || isNaN(d)) return null;
+  return d.toISOString().slice(0, 10);
+}
+
+// Reads every "* Employees Costs" sheet in the workbook. Column-A labels mark either an
+// employee name (start of a new block) or a known field row; date-valued header cells
+// (row starting with 'Pay Period') mark real period columns, distinct from the month-total
+// columns which carry a string label instead - only date columns get read, so totals are
+// never double-counted. Seeds PERSONAL_DAY_LOG (deduped, same as paystub-sourced entries)
+// and GROSS_HISTORY for the CNESST Labour Standards cap check.
+function parseLedgerWorkbook(workbook) {
+  const summary = { employees: new Set(), personalDaysFound: 0, periodsFound: 0, sheetsRead: [] };
+  const fieldLabels = getLedgerFieldLabels();
+  const sheetNames = workbook.SheetNames.filter(n => /employees costs/i.test(n));
+  for (const sheetName of sheetNames) {
+    const ws = workbook.Sheets[sheetName];
+    const rows = XLSX.utils.sheet_to_json(ws, { header: 1, raw: true, defval: null });
+    const headerRowIdx = rows.findIndex(r => (r[0] || '').toString().trim().toLowerCase() === 'pay period');
+    if (headerRowIdx === -1) continue;
+    summary.sheetsRead.push(sheetName);
+    const headerRow = rows[headerRowIdx];
+    const periodCols = [];
+    headerRow.forEach((val, colIdx) => {
+      const iso = ledgerIsoDate(val);
+      if (iso) periodCols.push({ col: colIdx, date: iso });
+    });
+
+    let currentEmployee = null;
+    for (let r = headerRowIdx + 1; r < rows.length; r++) {
+      const row = rows[r] || [];
+      const label = (row[0] || '').toString().trim();
+      if (!label) continue;
+      const labelLower = normalizeLabel(label);
+      if (fieldLabels.has(labelLower)) {
+        if (!currentEmployee) continue;
+        if (labelLower === normalizeLabel('Personal Day')) {
+          for (const pc of periodCols) {
+            const val = row[pc.col];
+            if (typeof val === 'number' && val > 0) {
+              const exists = PERSONAL_DAY_LOG.some(e => e.employee === currentEmployee && e.period === pc.date);
+              if (!exists) { PERSONAL_DAY_LOG.push({ employee: currentEmployee, period: pc.date, amount: val }); summary.personalDaysFound++; }
+            }
+          }
+        } else if (labelLower === normalizeLabel('Gross Income')) {
+          for (const pc of periodCols) {
+            const val = row[pc.col];
+            if (typeof val === 'number') { recordGrossHistory(currentEmployee, pc.date, val); summary.periodsFound++; }
+          }
+        }
+        summary.employees.add(currentEmployee);
+      } else {
+        currentEmployee = label;
+      }
+    }
+  }
+  return summary;
+}
+
+// ---- Ledger upload handling ----
+const ledgerDropZone = document.getElementById('ledger-drop-zone');
+const ledgerFileInput = document.getElementById('ledger-file-input');
+ledgerDropZone.addEventListener('click', () => ledgerFileInput.click());
+ledgerDropZone.addEventListener('dragover', e => { e.preventDefault(); ledgerDropZone.classList.add('dragover'); });
+ledgerDropZone.addEventListener('dragleave', () => ledgerDropZone.classList.remove('dragover'));
+ledgerDropZone.addEventListener('drop', e => {
+  e.preventDefault(); ledgerDropZone.classList.remove('dragover');
+  if (e.dataTransfer.files.length) handleLedgerFile(e.dataTransfer.files[0]);
+});
+ledgerFileInput.addEventListener('change', () => { if (ledgerFileInput.files.length) handleLedgerFile(ledgerFileInput.files[0]); });
+
+async function handleLedgerFile(file) {
+  const errEl = document.getElementById('ledger-error-msg');
+  const statusEl = document.getElementById('ledger-status-msg');
+  errEl.style.display = 'none';
+  document.getElementById('ledger-filename-display').textContent = file.name;
+  statusEl.textContent = 'Reading workbook…';
+  try {
+    const buf = await file.arrayBuffer();
+    const workbook = XLSX.read(buf, { type: 'array', cellDates: true });
+    const summary = parseLedgerWorkbook(workbook);
+    if (summary.sheetsRead.length === 0) {
+      errEl.textContent = 'No sheet named "Employees Costs" (or similar) found in this workbook.';
+      errEl.style.display = 'block';
+      statusEl.textContent = '';
+      return;
+    }
+    statusEl.textContent = `Loaded ${summary.sheetsRead.join(', ')}: ${summary.employees.size} employee(s), ${summary.personalDaysFound} personal-day entr${summary.personalDaysFound===1?'y':'ies'} backfilled, ${summary.periodsFound} period(s) of gross history recorded.`;
+    buildCeuLogTable();
+    renderTrackerSummary();
+    document.querySelectorAll('.stub-card').forEach(card => {
+      const stub = card._stub;
+      if (!stub) return;
+      const isMario = card.dataset.isMario === 'true';
+      stub.labour_standards = calculateLabourStandards(stub);
+      const costBlock = document.getElementById(card._uid + '-costblock');
+      if (costBlock) costBlock.value = fieldsToCostBlock(stub, card.dataset.type);
+    });
+  } catch (e) {
+    errEl.textContent = 'Could not read this workbook: ' + e.message;
+    errEl.style.display = 'block';
+    statusEl.textContent = '';
+  }
+}
+
 // ---- Upload handling ----
 const dropZone = document.getElementById('drop-zone');
 const fileInput = document.getElementById('file-input');
@@ -312,6 +970,8 @@ async function handleFiles(files) {
   }
 
   allStubs = allStubs.concat(newStubs);
+  logPersonalDaysFromStubs(newStubs);
+  logGrossHistoryFromStubs(newStubs);
   statusEl.textContent = allStubs.length + ' paystub(s) loaded.';
   render();
 }
@@ -337,18 +997,51 @@ function validateStub(stub, type, isMario, prevGrossForEmployee) {
       flags.push({ field: 'gross_income', level: 'flag', note: 'Large change from this employee\u2019s other uploaded period: ' + prevGrossForEmployee.toFixed(2) + ' \u2192 ' + gross.toFixed(2) + ' (' + (change * 100).toFixed(0) + '%). Please verify.' });
     }
   }
+  if ((stub.personal_day || 0) > 0) {
+    const roster = getRosterEntry(stub.employee_name);
+    if (roster.eligible !== false && roster.startDate) {
+      const window = getEmploymentYearWindow(roster.startDate, stub.pay_period_end || new Date().toISOString().slice(0,10));
+      const usedByThisPoint = PERSONAL_DAY_LOG.filter(e => e.employee === stub.employee_name && e.period <= stub.pay_period_end && e.period >= window.start).length;
+      if (usedByThisPoint > PERSONAL_DAY_CAP) {
+        flags.push({ field: 'personal_day', level: 'red', note: `Personal day #${usedByThisPoint} this employment year (${window.start} to ${window.end}) — over the ${PERSONAL_DAY_CAP}/year limit.` });
+      }
+    }
+  }
   return flags;
 }
 
-function fieldsToBlock(stub, type) {
-  const rows = ROW_ORDER[type];
-  const lines = [];
-  for (const row of rows) {
-    if (row.blank) { lines.push(''); continue; }
-    const v = stub[row.f] || 0;
-    lines.push(v.toFixed(2));
-  }
-  return lines.join('\n');
+// Full cost-visibility breakdown per employee type, matching your actual current sheet
+// structure (confirmed against the ledger file) - not a separate view, this is the real
+// row order.
+const COST_ROW_ORDER = {
+  kathy: [
+    {f:'gross_income',label:'Gross Income'}, {f:'stat_holiday_pay',label:'Stat Holiday Pay'},
+    {f:'vacation_paid',label:'Vacation Paid'}, {f:'das_total',label:'DAS'},
+    {f:'accrued_vacation',label:'Accrued Vacation'}, {f:'labour_standards',label:'CNESST LS (0.0006)'},
+    {f:'other',label:'Other'}
+  ],
+  mario: [
+    {f:'gross_income',label:'Gross Income'}, {f:'stat_holiday_pay',label:'Stat Holiday Pay'},
+    {f:'personal_day',label:'Personal Day'}, {f:'bonus',label:'Bonus'}, {f:'commission',label:'Commission'},
+    {f:'vacation_paid',label:'Vacation Paid'}, {f:'das_total',label:'DAS'},
+    {f:'health_insurance_er',label:'Group Health Insurance ER'}, {f:'ci_insurance_rop',label:'CI Insurance ROP'},
+    {f:'accrued_vacation',label:'Accrued Vacation'}, {f:'labour_standards',label:'CNESST LS (0.0006)'},
+    {f:'bonus_smoothing',label:'Bonus Monthly Smoothing'}, {f:'ceu_benefit',label:'CEU Benefit'}, {f:'ceu_smoothing',label:'CEU Monthly Smoothing'},
+    {f:'other',label:'Other'}
+  ],
+  regular: [
+    {f:'gross_income',label:'Gross Income'}, {f:'stat_holiday_pay',label:'Stat Holiday Pay'},
+    {f:'personal_day',label:'Personal Day'}, {f:'bonus',label:'Bonus'}, {f:'commission',label:'Commission'},
+    {f:'vacation_paid',label:'Vacation Paid'}, {f:'das_total',label:'DAS'},
+    {f:'health_insurance_er',label:'Group Health Insurance ER'}, {f:'rbc_company_contributions',label:'RBC - Company contributions'},
+    {f:'accrued_vacation',label:'Accrued Vacation'}, {f:'labour_standards',label:'CNESST LS (0.0006)'},
+    {f:'bonus_smoothing',label:'Bonus Monthly Smoothing'}, {f:'ceu_benefit',label:'CEU Benefit'}, {f:'ceu_smoothing',label:'CEU Monthly Smoothing'},
+    {f:'other',label:'Other'}
+  ],
+};
+
+function fieldsToCostBlock(stub, type) {
+  return COST_ROW_ORDER[type].map(row => (stub[row.f] || 0).toFixed(2)).join('\n');
 }
 
 function render() {
@@ -361,6 +1054,8 @@ function render() {
     if (a.employee_name !== b.employee_name) return a.employee_name.localeCompare(b.employee_name);
     return (a.pay_period_end || '').localeCompare(b.pay_period_end || '');
   });
+
+  applySmoothingAndCeu(sorted);
 
   // Duplicate check: same employee + same period end uploaded twice
   const seen = new Map();
@@ -382,7 +1077,14 @@ function render() {
   sorted.forEach((stub, idx) => {
     const type = detectType(stub.employee_name);
     const isMario = isMarioName(stub.employee_name);
+    const ceuEligible = getRosterEntry(stub.employee_name).eligible !== false;
+    if (stub.employee_name && !EMPLOYEE_ROSTER.hasOwnProperty(stub.employee_name)) {
+      EMPLOYEE_ROSTER[stub.employee_name] = { startDate: null, vacationRate: VACATION_ACCRUAL_RATE };
+      buildVacationRatesTable();
+    }
     stub.das_total = calculateDAS(stub, isMario);
+    stub.accrued_vacation = calculateAccruedVacation(stub);
+    stub.labour_standards = calculateLabourStandards(stub);
 
     const prevGross = prevGrossByEmployee[stub.employee_name];
     const flags = validateStub(stub, type, isMario, prevGross);
@@ -430,22 +1132,28 @@ function render() {
               ${type!=='kathy'?fieldRow('commission','Commission'):''}
               ${fieldRow('vacation_paid','Vacation Paid')}
               ${fieldRow('das_total','DAS Total')}
+              ${type!=='kathy'?fieldRow('health_insurance_er','Group Health Insurance ER'):''}
               ${type==='mario'?fieldRow('ci_insurance_rop','Critical Illness (ROP)'):''}
               ${type==='regular'?fieldRow('rbc_company_contributions','RBC Company Contributions'):''}
+              ${fieldRow('accrued_vacation','Accrued Vacation')}
+              ${fieldRow('labour_standards','CNESST Labour Standards')}
+              ${type!=='kathy'?fieldRow('bonus_smoothing','Bonus Monthly Smoothing'):''}
+              ${ceuEligible?fieldRow('ceu_benefit','CEU Benefit (this period)'):''}
+              ${ceuEligible?fieldRow('ceu_smoothing','CEU Monthly Smoothing'):''}
               ${fieldRow('other','Other (catch-all)')}
             </tbody>
           </table>
-          <p class="das-hint">DAS = QPP + QPIP×1.4 + EI×1.4 + Gross×1.65% ${isMario?'(CNESST excluded for Mario)':'+ Gross×0.833% CNESST'}, recalculates as you edit values above.</p>
+          <p class="das-hint">DAS = QPP + QPIP\u00d7${QPIP_EMPLOYER_MULTIPLIER} + EI\u00d7${EI_EMPLOYER_MULTIPLIER} + HSF(gross+employer benefits)\u00d7${(HSF_RATE*100).toFixed(2)}% ${isMario?'(CNESST excluded for Mario)':'+ CNESST(gross+employer RRSP)\u00d7'+(CNESST_RATE*100).toFixed(2)+'%'}. Recalculates as you edit values above.</p>
           ${otherWarning}
         </div>
         <div>
           <div class="copy-block">
             <div class="copy-block-title">
-              <span>Paste block — ${type} row order (${ROW_ORDER[type].length} rows incl. blank divider)</span>
-              <button class="copy-btn" id="${uid}-copybtn" onclick="copyBlock('${uid}')">Copy</button>
+              <span>Paste block — ${type} row order (${COST_ROW_ORDER[type].length} rows, confirmed against your live sheet)</span>
+              <button class="copy-btn" id="${uid}-costcopybtn" onclick="copyCostBlock('${uid}')">Copy</button>
             </div>
-            <textarea class="copy-paste" id="${uid}-block" readonly>${fieldsToBlock(stub, type)}</textarea>
-            <p class="copy-hint">Paste this as one vertical range starting at the Gross Income row for ${stub.employee_name || 'this employee'}'s column. Row order matches the sheet's ${type} block exactly, including the blank divider row.</p>
+            <textarea class="copy-paste" id="${uid}-costblock" readonly>${fieldsToCostBlock(stub, type)}</textarea>
+            <p class="copy-hint">Paste as one vertical range starting at Gross Income for ${stub.employee_name || 'this employee'}'s column: ${COST_ROW_ORDER[type].map(r=>r.label).join(' \u00b7 ')}</p>
           </div>
         </div>
       </div>`;
@@ -459,6 +1167,7 @@ function render() {
 
   window._cardStubs = window._cardStubs || {};
   document.querySelectorAll('.stub-card').forEach(c => { window._cardStubs[c._uid] = c; });
+  renderTrackerSummary();
 }
 
 function onFieldEdit(uid, field, value) {
@@ -480,15 +1189,17 @@ function onFieldEdit(uid, field, value) {
   }
   const isMario = card.dataset.isMario === 'true';
   stub.das_total = calculateDAS(stub, isMario);
+  stub.accrued_vacation = calculateAccruedVacation(stub);
+  stub.labour_standards = calculateLabourStandards(stub);
   const dasInput = document.getElementById(uid + '-das_total');
   if (dasInput) dasInput.value = stub.das_total;
-  const block = document.getElementById(uid + '-block');
-  if (block) block.value = fieldsToBlock(stub, card.dataset.type);
+  const costBlock = document.getElementById(uid + '-costblock');
+  if (costBlock) costBlock.value = fieldsToCostBlock(stub, card.dataset.type);
 }
 
-function copyBlock(uid) {
-  const block = document.getElementById(uid + '-block');
-  const btn = document.getElementById(uid + '-copybtn');
+function copyCostBlock(uid) {
+  const block = document.getElementById(uid + '-costblock');
+  const btn = document.getElementById(uid + '-costcopybtn');
   navigator.clipboard.writeText(block.value).then(() => {
     btn.textContent = 'Copied!';
     btn.classList.add('copied');
@@ -500,6 +1211,7 @@ function copyBlock(uid) {
     setTimeout(() => { btn.textContent = 'Copy'; }, 1800);
   });
 }
+
 </script>
 </body>
 </html>
