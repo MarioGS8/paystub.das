@@ -134,10 +134,10 @@
   <div class="card">
     <div class="card-title-row">
       <div class="card-title" style="margin-bottom:0">Employee roster</div>
-      <button class="settings-toggle" onclick="toggleVacationRates()">Edit</button>
+      <button class="settings-toggle" onclick="toggleVacationRates()">Close</button>
     </div>
     <p style="font-size:13px;color:#5f5e5a;">Start date sets each employee's anniversary year, used for the personal-day and CEU limits below. Vacation rate: 4% under 3 years of service, 6% at 3+ years per Quebec labour standards &mdash; update it yourself as people cross the mark, the tool won't detect it automatically.</p>
-    <div class="settings-section" id="vacation-rates-section">
+    <div class="settings-section open" id="vacation-rates-section">
       <table class="rates-table" id="vacation-rates-table">
         <thead><tr><th>Employee</th><th>Start date</th><th>Vacation rate</th></tr></thead>
         <tbody id="vacation-rates-tbody"></tbody>
