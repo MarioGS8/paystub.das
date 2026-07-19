@@ -257,8 +257,23 @@ let EMPLOYEE_ROSTER = {
   'Jordan Katsoulis': { startDate: '2024-09-15', vacationRate: 0.04 }, // vacation-entitlement date per contract recognition clause (effective date was 2025-08-01)
   'Gabrielle Khreiche': { startDate: '2024-11-15', vacationRate: 0.04 }, // vacation-entitlement date per contract recognition clause (effective date was 2025-08-01)
   'Grace Lewis': { startDate: '2025-07-07', vacationRate: 0.04 }, // confirmed, no recognition clause in contract
-  'Ryle Justin Hernandez': { startDate: '2025-07-07', vacationRate: 0.04 }, // confirmed, no recognition clause in contract
+  'Justin Hernandez': { startDate: '2025-07-07', vacationRate: 0.04 }, // confirmed, no recognition clause in contract. Legal/full name is "Ryle Justin Hernandez" - see NAME_ALIASES below, since the paystub PDF may print either form.
 };
+
+// Same person can appear under different name spellings across documents (paystub PDF
+// vs. employment contract vs. legal name). Every key is a lowercased, trimmed alias;
+// every value is the ONE canonical name used everywhere else in this tool (must match
+// an EMPLOYEE_ROSTER key exactly). Add a line here - not a second EMPLOYEE_ROSTER entry -
+// whenever a new alias turns up, so personal days/CEU/gross history/vacation all
+// accumulate against a single record instead of silently splitting across two "people."
+const NAME_ALIASES = {
+  'ryle justin hernandez': 'Justin Hernandez',
+  'justin hernandez': 'Justin Hernandez',
+};
+function canonicalizeName(name) {
+  const key = (name || '').trim().toLowerCase().replace(/\s+/g, ' ');
+  return NAME_ALIASES[key] || name;
+}
 
 function getRosterEntry(employeeName) {
   if (employeeName && EMPLOYEE_ROSTER.hasOwnProperty(employeeName)) {
@@ -499,7 +514,7 @@ function extractFieldsFromLines(parsedLines) {
     // Employee name (left column, header + address block)
     if (/^EMPLOYEE$/i.test(leftTrim)) { sawEmployeeHeader = true; }
     else if (sawEmployeeHeader && !nameCaptured && leftTrim) {
-      data.employee_name = leftTrim;
+      data.employee_name = canonicalizeName(leftTrim);
       nameCaptured = true;
       sawEmployeeHeader = false;
     }
@@ -799,7 +814,7 @@ function applyTrackerLogs() {
   CEU_LOG = [];
   for (const row of document.querySelectorAll('#ceu-log-tbody tr')) {
     const inputs = row.querySelectorAll('input');
-    const employee = inputs[0].value.trim();
+    const employee = canonicalizeName(inputs[0].value.trim());
     const date = inputs[1].value;
     const amount = parseFloat(inputs[2].value) || 0;
     if (employee && date) CEU_LOG.push({ employee, date, amount });
@@ -916,7 +931,7 @@ function parseLedgerWorkbook(workbook) {
         }
         summary.employees.add(currentEmployee);
       } else {
-        currentEmployee = label;
+        currentEmployee = canonicalizeName(label);
       }
     }
   }
