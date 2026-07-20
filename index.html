@@ -266,18 +266,43 @@ let EMPLOYEE_ROSTER = {
 };
 
 // Same person can appear under different name spellings across documents (paystub PDF
-// vs. employment contract vs. legal name). Every key is a lowercased, trimmed alias;
-// every value is the ONE canonical name used everywhere else in this tool (must match
-// an EMPLOYEE_ROSTER key exactly). Add a line here - not a second EMPLOYEE_ROSTER entry -
-// whenever a new alias turns up, so personal days/CEU/gross history/vacation all
-// accumulate against a single record instead of silently splitting across two "people."
+// vs. employment contract vs. legal name vs. ledger workbook, which writes "Last, First").
+// Every key is a lowercased, trimmed alias; every value is the ONE canonical name used
+// everywhere else in this tool (must match an EMPLOYEE_ROSTER key exactly). Add a line
+// here - not a second EMPLOYEE_ROSTER entry - whenever a new spelling turns up, so
+// personal days/CEU/gross history/vacation all accumulate against a single record instead
+// of silently splitting across two "people."
 const NAME_ALIASES = {
   'ryle justin hernandez': 'Justin Hernandez',
   'justin hernandez': 'Justin Hernandez',
+  'boomsara, alexis': 'Alexis Boosamra', // ledger spells the surname differently than the signed contract ("Boosamra") - flagged, not silently assumed
+  'boosamra, alexis': 'Alexis Boosamra',
 };
+
+// Resolves any name spelling/order to the roster's canonical "First Last" form.
+// Order of attempts: (1) exact alias match, (2) if the string is "Last, First" - the
+// format the ledger workbook uses throughout - swap to "First Last" and check that
+// against both the alias table and the roster directly, (3) otherwise return unchanged.
+// A name that fails all three isn't in the roster at all (e.g. a genuinely new hire) -
+// callers that need to gate on roster membership check EMPLOYEE_ROSTER.hasOwnProperty()
+// on the RESULT of this function, not on the raw input.
 function canonicalizeName(name) {
-  const key = (name || '').trim().toLowerCase().replace(/\s+/g, ' ');
-  return NAME_ALIASES[key] || name;
+  const raw = (name || '').trim().replace(/\s+/g, ' ');
+  const key = raw.toLowerCase();
+  if (NAME_ALIASES[key]) return NAME_ALIASES[key];
+
+  if (raw.includes(',')) {
+    const parts = raw.split(',').map(s => s.trim()).filter(Boolean);
+    if (parts.length === 2) {
+      const swapped = `${parts[1]} ${parts[0]}`;
+      const swappedKey = swapped.toLowerCase();
+      if (NAME_ALIASES[swappedKey]) return NAME_ALIASES[swappedKey];
+      const rosterMatch = Object.keys(EMPLOYEE_ROSTER).find(n => n.toLowerCase() === swappedKey);
+      if (rosterMatch) return rosterMatch;
+      return swapped; // no roster match, but still return name-order-corrected form rather than the raw "Last, First"
+    }
+  }
+  return raw;
 }
 
 function getRosterEntry(employeeName) {
@@ -871,9 +896,15 @@ function logGrossHistoryFromStubs(stubs) {
   }
 }
 
-// Field labels this ledger's row structure uses (matches COST_ROW_ORDER exactly, confirmed
-// against the real workbook). Any column-A cell NOT in this set is treated as a new
-// employee name starting a fresh block, since that's how the sheet is actually laid out.
+// Field labels this ledger's row structure uses. COST_ROW_ORDER covers the "actionable"
+// rows (values this tool reads or writes). PASSTHROUGH_ROW_LABELS covers rows that exist
+// in the sheet but aren't sourced from here - they must still be recognized as field rows
+// (not new-employee headers), or the parser loses track of whose block it's in the moment
+// it hits one. 'Bonus Quarterly Smoothing' sits between CNESST LS and CEU Benefit in every
+// regular/mario block, so without this the CEU Benefit row below it would be misread.
+const PASSTHROUGH_ROW_LABELS = ['Bonus Quarterly Smoothing', 'CEU Monthly Smoothing', 'Other'];
+const CEU_BENEFIT_LABEL = 'CEU Benefit - $500';
+
 function normalizeLabel(s) {
   return (s || '').toString().toLowerCase().replace(/\s+/g, '');
 }
@@ -881,6 +912,8 @@ function normalizeLabel(s) {
 function getLedgerFieldLabels() {
   return new Set(
     [].concat(COST_ROW_ORDER.regular, COST_ROW_ORDER.mario, COST_ROW_ORDER.kathy).map(r => normalizeLabel(r.label))
+      .concat(PASSTHROUGH_ROW_LABELS.map(normalizeLabel))
+      .concat([normalizeLabel(CEU_BENEFIT_LABEL)])
   );
 }
 
@@ -893,10 +926,13 @@ function ledgerIsoDate(d) {
 // employee name (start of a new block) or a known field row; date-valued header cells
 // (row starting with 'Pay Period') mark real period columns, distinct from the month-total
 // columns which carry a string label instead - only date columns get read, so totals are
-// never double-counted. Seeds PERSONAL_DAY_LOG (deduped, same as paystub-sourced entries)
-// and GROSS_HISTORY for the CNESST Labour Standards cap check.
+// never double-counted. Seeds PERSONAL_DAY_LOG and CEU_LOG (both deduped, same as
+// paystub-sourced entries) and GROSS_HISTORY for the CNESST Labour Standards cap check.
+// Katherine Campeau's block has none of Personal Day / Bonus / CEU rows at all (she's
+// marked eligible:false in the roster), so nothing here needs to special-case her - the
+// parser simply never finds those labels in her block and moves on.
 function parseLedgerWorkbook(workbook) {
-  const summary = { employees: new Set(), personalDaysFound: 0, periodsFound: 0, sheetsRead: [] };
+  const summary = { employees: new Set(), personalDaysFound: 0, ceuFound: 0, periodsFound: 0, sheetsRead: [], skipped: new Set() };
   const fieldLabels = getLedgerFieldLabels();
   const sheetNames = workbook.SheetNames.filter(n => /employees costs/i.test(n));
   for (const sheetName of sheetNames) {
@@ -928,6 +964,14 @@ function parseLedgerWorkbook(workbook) {
               if (!exists) { PERSONAL_DAY_LOG.push({ employee: currentEmployee, period: pc.date, amount: val }); summary.personalDaysFound++; }
             }
           }
+        } else if (labelLower === normalizeLabel(CEU_BENEFIT_LABEL)) {
+          for (const pc of periodCols) {
+            const val = row[pc.col];
+            if (typeof val === 'number' && val > 0) {
+              const exists = CEU_LOG.some(e => e.employee === currentEmployee && e.date === pc.date);
+              if (!exists) { CEU_LOG.push({ employee: currentEmployee, date: pc.date, amount: val }); summary.ceuFound++; }
+            }
+          }
         } else if (labelLower === normalizeLabel('Gross Income')) {
           for (const pc of periodCols) {
             const val = row[pc.col];
@@ -936,7 +980,13 @@ function parseLedgerWorkbook(workbook) {
         }
         summary.employees.add(currentEmployee);
       } else {
-        currentEmployee = canonicalizeName(label);
+        const canonical = canonicalizeName(label);
+        if (EMPLOYEE_ROSTER.hasOwnProperty(canonical)) {
+          currentEmployee = canonical;
+        } else {
+          currentEmployee = null; // not in roster (e.g. Jeffery Kim) - every actionable row below no-ops on null, so this block contributes nothing
+          summary.skipped.add(label);
+        }
       }
     }
   }
@@ -971,7 +1021,8 @@ async function handleLedgerFile(file) {
       statusEl.textContent = '';
       return;
     }
-    statusEl.textContent = `Loaded ${summary.sheetsRead.join(', ')}: ${summary.employees.size} employee(s), ${summary.personalDaysFound} personal-day entr${summary.personalDaysFound===1?'y':'ies'} backfilled, ${summary.periodsFound} period(s) of gross history recorded.`;
+    const skippedNote = summary.skipped.size > 0 ? ` Skipped (not in roster): ${[...summary.skipped].join(', ')}.` : '';
+    statusEl.textContent = `Loaded ${summary.sheetsRead.join(', ')}: ${summary.employees.size} employee(s), ${summary.personalDaysFound} personal-day entr${summary.personalDaysFound===1?'y':'ies'} backfilled, ${summary.ceuFound} CEU entr${summary.ceuFound===1?'y':'ies'} backfilled, ${summary.periodsFound} period(s) of gross history recorded.${skippedNote}`;
     buildCeuLogTable();
     renderTrackerSummary();
     document.querySelectorAll('.stub-card').forEach(card => {
