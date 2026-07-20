@@ -99,6 +99,11 @@
             <td style="font-size:12px;color:#5f5e5a">Applied to gross + employer RRSP match only. Use the periodic remittance rate, not the indicative "taux de prime".</td>
           </tr>
           <tr>
+            <td>Default vacation accrual</td>
+            <td><input type="number" id="rate-vacation-accrual" step="0.01" value="4"> %</td>
+            <td style="font-size:12px;color:#5f5e5a">Fallback rate only, used for anyone not yet listed in the Employee roster below. Each roster entry's own rate always overrides this.</td>
+          </tr>
+          <tr>
             <td>EI employer multiplier</td>
             <td><input type="number" id="rate-ei-mult" step="0.01" value="1.4"> &times;</td>
             <td style="font-size:12px;color:#5f5e5a">Applied to employee EI deduction</td>
