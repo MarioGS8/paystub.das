@@ -409,7 +409,7 @@ function getQuarterKey(dateStr) {
 
 const SUMMABLE_FIELDS = ['gross_income','stat_holiday_pay','personal_day','bonus','commission',
   'vacation_paid','other','ei_employee','qpp_employee','qpip_employee','ci_insurance_rop',
-  'rbc_company_contributions','health_insurance_er','employer_benefits_total','employer_rrsp_total'];
+  'rbc_company_contributions','health_insurance_er','employer_benefits_total','employer_rrsp_total','anomaly'];
 
 function mergeSamePeriodStubs(sortedStubs) {
   const groups = {};
@@ -519,11 +519,23 @@ function blankStub() {
     vacation_paid: 0, other: 0, ei_employee: 0, qpp_employee: 0, qpip_employee: 0,
     ci_insurance_rop: 0, rbc_company_contributions: 0, health_insurance_er: 0,
     employer_benefits_total: 0, employer_rrsp_total: 0,
-    bonus_smoothing: 0, ceu_benefit: 0, ceu_smoothing: 0
+    bonus_smoothing: 0, ceu_benefit: 0, ceu_smoothing: 0,
+    anomaly: 0, anomaly_labels: []
   };
 }
 
 function ddmmyyyyToIso(d, m, y) { return `${y}-${m}-${d}`; }
+
+// Known billable/earnings-type PAY-table lines that are deliberately NOT parsed
+// individually, because gross_income is pulled from the Summary section's authoritative
+// "Total Pay" figure instead. Without this whitelist, treating any unmatched left-column
+// line as an anomaly would false-positive on every one of these on every single stub.
+// Add a new line here if the clinic starts billing a new treatment/service type - until
+// then, anything not on this list AND not already a tracked field gets flagged below.
+const KNOWN_IGNORED_PAY_LABELS = new Set([
+  'Regular Pay', 'Treatment - 30 Minutes', 'Treatment - 45 Minutes', 'Treatment - 60 Minutes',
+  'Admin & Cleaning Hours', 'Charting', 'Marketing',
+].map(normalizeLabel));
 
 function extractFieldsFromLines(parsedLines) {
   const data = blankStub();
@@ -581,6 +593,13 @@ function extractFieldsFromLines(parsedLines) {
       else if (/^Employment\s+Insurance$/i.test(label)) data.ei_employee = current;
       else if (/^QC\s+Pension\s+Plan$/i.test(label)) data.qpp_employee = current;
       else if (/^QC\s+Parental\s+Insurance\s+Plan$/i.test(label)) data.qpip_employee = current;
+      else if (numbers.length > 0 && current !== 0 && label && !KNOWN_IGNORED_PAY_LABELS.has(normalizeLabel(label))) {
+        // Genuinely unrecognized nonzero line - not a known billable type, not already a
+        // tracked field. Sum in case more than one shows up on the same stub, and keep
+        // the raw label(s) so the warning tells you exactly what needs review.
+        data.anomaly = parseFloat((data.anomaly + current).toFixed(2));
+        data.anomaly_labels.push(label);
+      }
     }
 
     const pb = right.match(/Period Beginning\s+(\d{2})-(\d{2})-(\d{4})/i);
@@ -588,6 +607,16 @@ function extractFieldsFromLines(parsedLines) {
     const pe = right.match(/Period Ending:?\s+(\d{2})-(\d{2})-(\d{4})/i);
     if (pe) data.pay_period_end = ddmmyyyyToIso(pe[1], pe[2], pe[3]);
   }
+
+  // QBO's PAY table has room for a limited number of line items - once it's full,
+  // commission shows up under the generic "Other" line instead of its own "Commission"
+  // row. Confirmed against real stubs: Commission and Other are never both nonzero on the
+  // same stub, so there's no double-counting risk in combining them. This also means the
+  // "Other" catch-all warning below will never fire again - if a future "Other" line is
+  // NOT commission, it will now be silently absorbed with no flag, per owner decision.
+  data.commission = parseFloat((data.commission + data.other).toFixed(2));
+  data.other = 0;
+
   return data;
 }
 
@@ -1164,50 +1193,78 @@ const MONTH_LABEL_OVERRIDES = {
   '2026-12-25': 'December 2026',  '2027-01-10': 'December 2026',
 };
 
-function computeMonthlySummaries(stubsWithFields) {
+// Builds one employee's full year as a tab-separated grid: 3 columns per month
+// (paystub 1, paystub 2, month total), Jan-Dec, one row per COST_ROW_ORDER field. Tabs
+// between columns and newlines between rows is what makes a spreadsheet paste spread
+// correctly across cells instead of dumping everything into one column. Months with no
+// uploaded paystubs are left as empty cells (not "0.00") so pasting the whole year at
+// once can't accidentally zero out a month you haven't gotten to processing yet.
+function buildYearlyGrid(type, employeeStubs) {
   const groups = {};
-  for (const stub of stubsWithFields) {
-    if (!stub.employee_name || !stub.pay_period_end) continue;
+  for (const stub of employeeStubs) {
+    if (!stub.pay_period_end) continue;
     const override = MONTH_LABEL_OVERRIDES[stub.pay_period_end];
-    const monthKey = override || stub.pay_period_end.slice(0, 7);
-    const key = stub.employee_name + '|' + monthKey;
-    if (!groups[key]) groups[key] = { employee: stub.employee_name, monthKey, monthLabel: override || null, type: detectType(stub.employee_name), stubs: [] };
-    groups[key].stubs.push(stub);
+    const monthLabel = override || new Date(stub.pay_period_end.slice(0, 7) + '-01T00:00:00').toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+    (groups[monthLabel] = groups[monthLabel] || []).push(stub);
   }
-  return Object.values(groups).map(g => {
-    const summed = {};
-    for (const row of COST_ROW_ORDER[g.type]) {
-      summed[row.f] = Math.round(g.stubs.reduce((sum, s) => sum + (s[row.f] || 0), 0) * 100) / 100;
+  const years = employeeStubs.map(s => parseInt((s.pay_period_end || '').slice(0, 4), 10)).filter(Boolean);
+  const year = years.length ? Math.min(...years) : new Date().getFullYear();
+  const monthNames = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+  const orderedLabels = monthNames.map(m => `${m} ${year}`);
+
+  const rowLines = COST_ROW_ORDER[type].map(rowDef => {
+    const cells = [];
+    for (const label of orderedLabels) {
+      const monthStubs = (groups[label] || []).slice().sort((a, b) => (a.pay_period_end || '').localeCompare(b.pay_period_end || ''));
+      // Only the first two chronological periods get their own column - matches the
+      // sheet's fixed 2-period-per-month layout. A rare 3rd period in one month still
+      // gets counted in the Total column below, just not shown as its own column.
+      const p1 = monthStubs[0] ? (monthStubs[0][rowDef.f] || 0).toFixed(2) : '';
+      const p2 = monthStubs[1] ? (monthStubs[1][rowDef.f] || 0).toFixed(2) : '';
+      const totalStr = monthStubs.length ? (Math.round(monthStubs.reduce((sum, s) => sum + (s[rowDef.f] || 0), 0) * 100) / 100).toFixed(2) : '';
+      cells.push(p1, p2, totalStr);
     }
-    return { employee: g.employee, monthKey: g.monthKey, monthLabel: g.monthLabel, type: g.type, summed, periodCount: g.stubs.length, expectedFreq: getPayFrequencyFor(g.employee) };
-  }).sort((a, b) => a.employee === b.employee ? a.monthKey.localeCompare(b.monthKey) : a.employee.localeCompare(b.employee));
+    return cells.join('\t');
+  });
+  const monthsWithData = Object.keys(groups).length;
+  return { text: rowLines.join('\n'), year, monthsWithData };
+}
+
+function computeMonthlySummaries(stubsWithFields) {
+  const byEmployee = {};
+  for (const stub of stubsWithFields) {
+    if (!stub.employee_name) continue;
+    (byEmployee[stub.employee_name] = byEmployee[stub.employee_name] || []).push(stub);
+  }
+  return Object.entries(byEmployee).map(([employee, stubs]) => {
+    const type = detectType(employee);
+    return { employee, type, ...buildYearlyGrid(type, stubs) };
+  }).sort((a, b) => a.employee.localeCompare(b.employee));
 }
 
 function renderMonthlySummaries(stubsWithFields) {
   const existing = document.getElementById('monthly-summaries-card');
   if (existing) existing.remove();
-  const summaries = computeMonthlySummaries(stubsWithFields);
-  if (summaries.length === 0) return;
+  const grids = computeMonthlySummaries(stubsWithFields);
+  if (grids.length === 0) return;
 
   const wrap = document.createElement('div');
   wrap.className = 'card';
   wrap.id = 'monthly-summaries-card';
-  wrap.innerHTML = '<div class="card-title">Monthly totals</div><p style="font-size:13px;color:#5f5e5a;margin-bottom:1rem;">Each block sums every uploaded paycheque for that employee within the calendar month - paste this into the sheet\'s monthly-total column instead of adding the pay-period pastes by hand.</p>';
+  wrap.innerHTML = '<div class="card-title">Full year (paste-ready)</div><p style="font-size:13px;color:#5f5e5a;margin-bottom:1rem;">One block per employee, Jan\u2013Dec, 3 columns per month (paystub 1, paystub 2, month total). Paste the whole block starting at the Gross Income cell to fill the entire year in one shot.</p>';
 
-  summaries.forEach((s, idx) => {
-    const uid = 'month' + idx;
-    const incomplete = s.periodCount < s.expectedFreq;
-    const monthLabel = s.monthLabel || new Date(s.monthKey + '-01T00:00:00').toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+  grids.forEach((g, idx) => {
+    const uid = 'year' + idx;
     const block = document.createElement('div');
     block.className = 'copy-block';
     block.style.marginBottom = '1rem';
     block.innerHTML = `
       <div class="copy-block-title">
-        <span>${s.employee} \u2014 ${monthLabel} (${s.periodCount} period${s.periodCount === 1 ? '' : 's'} combined${incomplete ? ', expected ' + s.expectedFreq : ''})</span>
+        <span>${g.employee} \u2014 ${g.year} (${g.monthsWithData} month${g.monthsWithData === 1 ? '' : 's'} of data uploaded)</span>
         <button class="copy-btn" id="${uid}-costcopybtn" onclick="copyCostBlock('${uid}')">Copy</button>
       </div>
-      <textarea class="copy-paste" id="${uid}-costblock" readonly>${fieldsToCostBlock(s.summed, s.type)}</textarea>
-      ${incomplete ? `<p class="copy-hint" style="color:#a32d2d">\u26a0 Only ${s.periodCount} of the usual ${s.expectedFreq} pay period(s) for this month were uploaded \u2014 this total may be incomplete.</p>` : `<p class="copy-hint">${COST_ROW_ORDER[s.type].map(r => r.label).join(' \u00b7 ')}</p>`}
+      <textarea class="copy-paste" id="${uid}-costblock" readonly style="min-height:260px">${g.text}</textarea>
+      <p class="copy-hint">Rows: ${COST_ROW_ORDER[g.type].map(r => r.label).join(' \u00b7 ')}. Each row runs Jan P1 \u2192 Jan P2 \u2192 Jan Total \u2192 Feb P1 \u2026 through Dec Total.</p>
     `;
     wrap.appendChild(block);
   });
@@ -1300,8 +1357,8 @@ function render() {
       </tr>`;
     };
 
-    const otherWarning = (stub.other || 0) !== 0
-      ? `<div class="other-warning"><strong>⚠ "Other" pay detected: $${stub.other.toFixed(2)}</strong>This is a catch-all field — review the PDF and move it to the correct row manually before pasting.</div>`
+    const anomalyWarning = (stub.anomaly || 0) !== 0
+      ? `<div class="other-warning"><strong>⚠ Unrecognized pay line detected: $${stub.anomaly.toFixed(2)}</strong>Label(s) the parser didn't recognize: ${(stub.anomaly_labels || []).join(', ')}. Review the PDF and either add this label to KNOWN_IGNORED_PAY_LABELS (if it's a normal new treatment/service type) or move it to the correct row manually before pasting.</div>`
       : '';
 
     card.innerHTML = `
@@ -1332,11 +1389,11 @@ function render() {
               ${fieldRow('labour_standards','CNESST Labour Standards')}
               ${ceuEligible?fieldRow('ceu_benefit','CEU Benefit (this period)'):''}
               ${ceuEligible?fieldRow('ceu_smoothing','CEU Monthly Smoothing'):''}
-              ${fieldRow('other','Other (catch-all)')}
+              ${fieldRow('anomaly','Anomaly (unrecognized line)')}
             </tbody>
           </table>
           <p class="das-hint">DAS = QPP + QPIP\u00d7${QPIP_EMPLOYER_MULTIPLIER} + EI\u00d7${EI_EMPLOYER_MULTIPLIER} + HSF(gross+employer benefits)\u00d7${(HSF_RATE*100).toFixed(2)}% ${isMario?'(CNESST excluded for Mario)':'+ CNESST(gross+employer RRSP)\u00d7'+(CNESST_RATE*100).toFixed(2)+'%'}. Recalculates as you edit values above.</p>
-          ${otherWarning}
+          ${anomalyWarning}
         </div>
         <div>
           <div class="copy-block">
