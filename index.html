@@ -144,7 +144,7 @@
     <p style="font-size:13px;color:#5f5e5a;">Start date sets each employee's anniversary year, used for the personal-day and CEU limits below. Vacation rate: 4% under 3 years of service, 6% at 3+ years per Quebec labour standards &mdash; update it yourself as people cross the mark, the tool won't detect it automatically.</p>
     <div class="settings-section open" id="vacation-rates-section">
       <table class="rates-table" id="vacation-rates-table">
-        <thead><tr><th>Employee</th><th>Start date</th><th>Vacation rate</th></tr></thead>
+        <thead><tr><th>Employee</th><th>Start date</th><th>Vacation rate</th><th>Monthly premium ($)</th><th>Pay freq/month</th></tr></thead>
         <tbody id="vacation-rates-tbody"></tbody>
       </table>
       <div style="display:flex;align-items:center;gap:10px;margin-top:1rem;flex-wrap:wrap">
@@ -248,14 +248,43 @@ function isMarioName(name) {
 // plus vacation accrual rate. Start dates are placeholders until the real ones are
 // provided - anything still '2025-01-01' hasn't been confirmed yet.
 let EMPLOYEE_ROSTER = {
-  'Mario Starnino': { startDate: '2023-01-01', vacationRate: 0.06 }, // fixed at 3wks/6% regardless of tenure per owner decision; year anchored to Jan 1
-  'Alexis Boosamra': { startDate: '2023-12-01', vacationRate: 0.04 }, // confirmed - 3yr mark ~Dec 2026
-  'Katherine Campeau': { startDate: '2025-01-01', vacationRate: 0.04, eligible: false }, // no personal days or CEU - excluded from tracker
-  'Jordan Katsoulis': { startDate: '2024-09-15', vacationRate: 0.04 }, // vacation-entitlement date per contract recognition clause (effective date was 2025-08-01)
-  'Gabrielle Khreiche': { startDate: '2024-11-15', vacationRate: 0.04 }, // vacation-entitlement date per contract recognition clause (effective date was 2025-08-01)
-  'Grace Lewis': { startDate: '2025-07-07', vacationRate: 0.04 }, // confirmed, no recognition clause in contract
-  'Justin Hernandez': { startDate: '2025-07-07', vacationRate: 0.04 }, // confirmed, no recognition clause in contract. Legal/full name is "Ryle Justin Hernandez" - see NAME_ALIASES below, since the paystub PDF may print either form.
+  // groupPremiumMonthly: employer's 50% share of the Gestion T.P.A. group insurance
+  // invoice Grand total (Life/AD&D/LTD/Health/C.I./Dental/EAP combined) - the raw MONTHLY
+  // figure straight off the invoice x0.5, not pre-divided by pay periods. payFrequencyPerMonth
+  // is how many paycheques that monthly premium gets split across (2 = semi-monthly, the
+  // default for everyone except Mario, who is paid monthly = 1). getGroupPremiumFor() divides
+  // these automatically, so changing either number here (a new invoice, or someone's pay
+  // schedule changing) recalculates correctly without redoing the division by hand.
+  // COMPLETELY SEPARATE from health_insurance_er (parsed from the paystub), which still
+  // feeds the HSF/DAS calculation untouched - these fields only feed the cost-block row,
+  // per owner decision. Also drives CEU monthly smoothing below (500/(frequency x 12)).
+  'Mario Starnino': { startDate: '2023-01-01', vacationRate: 0.06, groupPremiumMonthly: 32.09, payFrequencyPerMonth: 1 }, // fixed at 3wks/6% regardless of tenure per owner decision; year anchored to Jan 1
+  'Alexis Boosamra': { startDate: '2023-12-01', vacationRate: 0.04, groupPremiumMonthly: 67.19, payFrequencyPerMonth: 2 }, // confirmed - 3yr mark ~Dec 2026
+  'Katherine Campeau': { startDate: '2025-01-01', vacationRate: 0.04, eligible: false, payFrequencyPerMonth: 2 }, // no personal days or CEU - excluded from tracker. Not on the T.P.A. invoice - no premium set.
+  'Jordan Katsoulis': { startDate: '2024-09-15', vacationRate: 0.04, groupPremiumMonthly: 63.025, payFrequencyPerMonth: 2 }, // vacation-entitlement date per contract recognition clause (effective date was 2025-08-01)
+  'Gabrielle Khreiche': { startDate: '2024-11-15', vacationRate: 0.04, groupPremiumMonthly: 63.025, payFrequencyPerMonth: 2 }, // vacation-entitlement date per contract recognition clause (effective date was 2025-08-01)
+  'Grace Lewis': { startDate: '2025-07-07', vacationRate: 0.04, groupPremiumMonthly: 65.11, payFrequencyPerMonth: 2 }, // confirmed, no recognition clause in contract
+  'Justin Hernandez': { startDate: '2025-07-07', vacationRate: 0.04, groupPremiumMonthly: 64.075, payFrequencyPerMonth: 2 }, // confirmed, no recognition clause in contract. Legal/full name is "Ryle Justin Hernandez" - see NAME_ALIASES below, since the paystub PDF may print either form.
 };
+
+// Safe cent rounding - plain Math.round(n*100)/100 misfires on half-cent inputs (e.g.
+// 33.595) because of IEEE754 floating-point representation error, silently rounding down
+// when it should round up. The epsilon nudge fixes that for all the values this tool uses.
+function roundCurrency(n) {
+  return Math.round((n + 1e-9) * 100) / 100;
+}
+
+function getPayFrequencyFor(employeeName) {
+  const roster = getRosterEntry(employeeName);
+  return typeof roster.payFrequencyPerMonth === 'number' && roster.payFrequencyPerMonth > 0 ? roster.payFrequencyPerMonth : 2;
+}
+
+function getGroupPremiumFor(employeeName) {
+  const roster = getRosterEntry(employeeName);
+  if (typeof roster.groupPremiumMonthly !== 'number') return 0;
+  const freq = getPayFrequencyFor(employeeName);
+  return roundCurrency(roster.groupPremiumMonthly / freq);
+}
 
 // Same person can appear under different name spellings across documents (paystub PDF
 // vs. employment contract vs. legal name vs. ledger workbook, which writes "Last, First").
@@ -440,7 +469,9 @@ function applySmoothingAndCeu(sortedStubs) {
     }
 
     if (roster.eligible !== false) {
-      const perPeriodCeu = Math.round((500 / 24) * 100) / 100;
+      const freq = getPayFrequencyFor(employee);
+      const annualPeriods = freq * 12;
+      const perPeriodCeu = roundCurrency(500 / annualPeriods);
       for (const stub of stubs) {
         stub.ceu_smoothing = perPeriodCeu;
         const match = CEU_LOG.find(e => e.employee === employee && stub.pay_period_start && stub.pay_period_end && e.date >= stub.pay_period_start && e.date <= stub.pay_period_end);
@@ -671,7 +702,9 @@ function buildVacationRatesTable() {
   tbody.innerHTML = '';
   for (const [name, entry] of Object.entries(EMPLOYEE_ROSTER)) {
     const tr = document.createElement('tr');
-    tr.innerHTML = `<td>${name}</td><td><input type="date" value="${entry.startDate||''}" data-employee="${name}" data-field="startDate"></td><td><input type="number" step="0.01" value="${(entry.vacationRate*100).toFixed(2)}" data-employee="${name}" data-field="vacationRate"> %</td>`;
+    const premiumVal = typeof entry.groupPremiumMonthly === 'number' ? entry.groupPremiumMonthly : '';
+    const freqVal = typeof entry.payFrequencyPerMonth === 'number' ? entry.payFrequencyPerMonth : 2;
+    tr.innerHTML = `<td>${name}</td><td><input type="date" value="${entry.startDate||''}" data-employee="${name}" data-field="startDate"></td><td><input type="number" step="0.01" value="${(entry.vacationRate*100).toFixed(2)}" data-employee="${name}" data-field="vacationRate"> %</td><td><input type="number" step="0.01" min="0" value="${premiumVal}" placeholder="0.00" data-employee="${name}" data-field="groupPremiumMonthly"></td><td><input type="number" step="1" min="1" value="${freqVal}" style="width:60px" data-employee="${name}" data-field="payFrequencyPerMonth"></td>`;
     tbody.appendChild(tr);
   }
 }
@@ -687,12 +720,17 @@ function applyVacationRates() {
   document.querySelectorAll('#vacation-rates-tbody input').forEach(input => {
     const name = input.dataset.employee;
     if (input.dataset.field === 'startDate') EMPLOYEE_ROSTER[name].startDate = input.value;
-    else EMPLOYEE_ROSTER[name].vacationRate = (parseFloat(input.value) || 0) / 100;
+    else if (input.dataset.field === 'vacationRate') EMPLOYEE_ROSTER[name].vacationRate = (parseFloat(input.value) || 0) / 100;
+    else if (input.dataset.field === 'groupPremiumMonthly') EMPLOYEE_ROSTER[name].groupPremiumMonthly = input.value === '' ? undefined : (parseFloat(input.value) || 0);
+    else if (input.dataset.field === 'payFrequencyPerMonth') EMPLOYEE_ROSTER[name].payFrequencyPerMonth = parseInt(input.value, 10) || 2;
   });
+  const currentStubs = Object.values(window._cardStubs || {}).map(c => c._stub).filter(Boolean);
+  if (currentStubs.length) applySmoothingAndCeu(currentStubs);
   document.querySelectorAll('.stub-card').forEach(card => {
     const stub = card._stub;
     if (!stub) return;
     stub.accrued_vacation = calculateAccruedVacation(stub);
+    stub.group_premium = getGroupPremiumFor(stub.employee_name);
     const costBlock = document.getElementById(card._uid + '-costblock');
     if (costBlock) costBlock.value = fieldsToCostBlock(stub, card.dataset.type);
   });
@@ -1074,14 +1112,14 @@ const COST_ROW_ORDER = {
     {f:'gross_income',label:'Gross Income'}, {f:'stat_holiday_pay',label:'Stat Holiday Pay'},
     {f:'personal_day',label:'Personal Day'}, {f:'bonus',label:'Bonus'}, {f:'commission',label:'Commission'},
     {f:'vacation_paid',label:'Vacation Paid'}, {f:'das_total',label:'DAS'},
-    {f:'health_insurance_er',label:'Group Health Insurance ER'}, {f:'ci_insurance_rop',label:'CI Insurance ROP'},
+    {f:'group_premium',label:'Group Benefits Premium (ER)'}, {f:'ci_insurance_rop',label:'CI Insurance ROP'},
     {f:'accrued_vacation',label:'Accrued Vacation'}, {f:'labour_standards',label:'CNESST LS (0.0006)'}
   ],
   regular: [
     {f:'gross_income',label:'Gross Income'}, {f:'stat_holiday_pay',label:'Stat Holiday Pay'},
     {f:'personal_day',label:'Personal Day'}, {f:'bonus',label:'Bonus'}, {f:'commission',label:'Commission'},
     {f:'vacation_paid',label:'Vacation Paid'}, {f:'das_total',label:'DAS'},
-    {f:'health_insurance_er',label:'Group Health Insurance ER'}, {f:'rbc_company_contributions',label:'RBC - Company contributions'},
+    {f:'group_premium',label:'Group Benefits Premium (ER)'}, {f:'rbc_company_contributions',label:'RBC - Company contributions'},
     {f:'accrued_vacation',label:'Accrued Vacation'}, {f:'labour_standards',label:'CNESST LS (0.0006)'}
   ],
 };
@@ -1148,9 +1186,13 @@ function render() {
     stub.das_total = calculateDAS(stub, isMario);
     stub.accrued_vacation = calculateAccruedVacation(stub);
     stub.labour_standards = calculateLabourStandards(stub);
+    stub.group_premium = getGroupPremiumFor(stub.employee_name);
 
     const prevGross = prevGrossByEmployee[stub.employee_name];
     const flags = validateStub(stub, type, isMario, prevGross);
+    if (type !== 'kathy' && getRosterEntry(stub.employee_name).eligible !== false && stub.group_premium === 0) {
+      flags.push({ field: 'group_premium', level: 'flag', note: 'No hardcoded group premium set for this employee in EMPLOYEE_ROSTER - Group Benefits Premium will show as $0.00 until one is added.' });
+    }
     prevGrossByEmployee[stub.employee_name] = stub.gross_income;
 
     const uid = 'stub' + idx;
@@ -1195,7 +1237,8 @@ function render() {
               ${type!=='kathy'?fieldRow('commission','Commission'):''}
               ${fieldRow('vacation_paid','Vacation Paid')}
               ${fieldRow('das_total','DAS Total')}
-              ${type!=='kathy'?fieldRow('health_insurance_er','Group Health Insurance ER'):''}
+              ${type!=='kathy'?fieldRow('health_insurance_er','Health Insurance ER (paystub, HSF calc only)'):''}
+              ${type!=='kathy'?fieldRow('group_premium','Group Benefits Premium (ER, hardcoded)'):''}
               ${type==='mario'?fieldRow('ci_insurance_rop','Critical Illness (ROP)'):''}
               ${type==='regular'?fieldRow('rbc_company_contributions','RBC Company Contributions'):''}
               ${fieldRow('accrued_vacation','Accrued Vacation')}
@@ -1246,6 +1289,8 @@ function onFieldEdit(uid, field, value) {
   } else if (field === 'ci_insurance_rop') {
     stub.employer_benefits_total = (stub.employer_benefits_total || 0) + delta;
   }
+  // group_premium is display/cost-block only - deliberately does NOT touch
+  // employer_benefits_total, employer_rrsp_total, or calculateDAS below.
   const isMario = card.dataset.isMario === 'true';
   stub.das_total = calculateDAS(stub, isMario);
   stub.accrued_vacation = calculateAccruedVacation(stub);
