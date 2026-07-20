@@ -668,6 +668,7 @@ function applyRates() {
   const conf = document.getElementById('rates-confirm');
   conf.classList.add('show');
   setTimeout(() => conf.classList.remove('show'), 1800);
+  refreshMonthlySummaries();
 }
 
 function saveRatesFile() {
@@ -745,6 +746,7 @@ function applyVacationRates() {
   const conf = document.getElementById('vacation-rates-confirm');
   conf.classList.add('show');
   setTimeout(() => conf.classList.remove('show'), 1800);
+  refreshMonthlySummaries();
 }
 
 function saveVacationRatesFile() {
@@ -1017,6 +1019,7 @@ async function handleLedgerFile(file) {
       const costBlock = document.getElementById(card._uid + '-costblock');
       if (costBlock) costBlock.value = fieldsToCostBlock(stub, card.dataset.type);
     });
+    refreshMonthlySummaries();
   } catch (e) {
     errEl.textContent = 'Could not read this workbook: ' + e.message;
     errEl.style.display = 'block';
@@ -1133,6 +1136,83 @@ const COST_ROW_ORDER = {
 
 function fieldsToCostBlock(stub, type) {
   return COST_ROW_ORDER[type].map(row => (stub[row.f] || 0).toFixed(2)).join('\n');
+}
+
+// ---- Monthly totals (for the sheet's third/monthly-total column) ----
+// Groups already-computed stubs (das_total, accrued_vacation, labour_standards,
+// group_premium all filled in by the render() loop before this runs) by employee +
+// calendar month, and sums every COST_ROW_ORDER field across whatever periods were
+// uploaded for that month. All of those fields are legitimately additive per-period
+// amounts (not running balances), so summing is the correct way to get a month total -
+// unlike something like a YTD figure, which would need max() instead of sum().
+function refreshMonthlySummaries() {
+  const currentStubs = Object.values(window._cardStubs || {}).map(c => c._stub).filter(Boolean);
+  if (currentStubs.length) renderMonthlySummaries(currentStubs);
+}
+
+// Jan-Aug pay periods are clean semi-monthly (1st-15th / 16th-end) and line up with real
+// calendar months, so grouping by pay_period_end's YYYY-MM works for them. Starting Sept
+// 2026 the actual pay calendar drifts away from real calendar-month boundaries (e.g. the
+// "September" column covers periods ending Sep 20 AND Oct 6) while STILL being labeled by
+// month name sequentially on the sheet. Grouping by calendar month would silently misfile
+// these under the wrong column - so these exact date pairs are hardcoded straight from the
+// sheet header instead of inferred. Extend this table if the drift continues past Dec 2026.
+const MONTH_LABEL_OVERRIDES = {
+  '2026-09-20': 'September 2026', '2026-10-06': 'September 2026',
+  '2026-10-22': 'October 2026',   '2026-11-07': 'October 2026',
+  '2026-11-23': 'November 2026',  '2026-12-09': 'November 2026',
+  '2026-12-25': 'December 2026',  '2027-01-10': 'December 2026',
+};
+
+function computeMonthlySummaries(stubsWithFields) {
+  const groups = {};
+  for (const stub of stubsWithFields) {
+    if (!stub.employee_name || !stub.pay_period_end) continue;
+    const override = MONTH_LABEL_OVERRIDES[stub.pay_period_end];
+    const monthKey = override || stub.pay_period_end.slice(0, 7);
+    const key = stub.employee_name + '|' + monthKey;
+    if (!groups[key]) groups[key] = { employee: stub.employee_name, monthKey, monthLabel: override || null, type: detectType(stub.employee_name), stubs: [] };
+    groups[key].stubs.push(stub);
+  }
+  return Object.values(groups).map(g => {
+    const summed = {};
+    for (const row of COST_ROW_ORDER[g.type]) {
+      summed[row.f] = Math.round(g.stubs.reduce((sum, s) => sum + (s[row.f] || 0), 0) * 100) / 100;
+    }
+    return { employee: g.employee, monthKey: g.monthKey, monthLabel: g.monthLabel, type: g.type, summed, periodCount: g.stubs.length, expectedFreq: getPayFrequencyFor(g.employee) };
+  }).sort((a, b) => a.employee === b.employee ? a.monthKey.localeCompare(b.monthKey) : a.employee.localeCompare(b.employee));
+}
+
+function renderMonthlySummaries(stubsWithFields) {
+  const existing = document.getElementById('monthly-summaries-card');
+  if (existing) existing.remove();
+  const summaries = computeMonthlySummaries(stubsWithFields);
+  if (summaries.length === 0) return;
+
+  const wrap = document.createElement('div');
+  wrap.className = 'card';
+  wrap.id = 'monthly-summaries-card';
+  wrap.innerHTML = '<div class="card-title">Monthly totals</div><p style="font-size:13px;color:#5f5e5a;margin-bottom:1rem;">Each block sums every uploaded paycheque for that employee within the calendar month - paste this into the sheet\'s monthly-total column instead of adding the pay-period pastes by hand.</p>';
+
+  summaries.forEach((s, idx) => {
+    const uid = 'month' + idx;
+    const incomplete = s.periodCount < s.expectedFreq;
+    const monthLabel = s.monthLabel || new Date(s.monthKey + '-01T00:00:00').toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+    const block = document.createElement('div');
+    block.className = 'copy-block';
+    block.style.marginBottom = '1rem';
+    block.innerHTML = `
+      <div class="copy-block-title">
+        <span>${s.employee} \u2014 ${monthLabel} (${s.periodCount} period${s.periodCount === 1 ? '' : 's'} combined${incomplete ? ', expected ' + s.expectedFreq : ''})</span>
+        <button class="copy-btn" id="${uid}-costcopybtn" onclick="copyCostBlock('${uid}')">Copy</button>
+      </div>
+      <textarea class="copy-paste" id="${uid}-costblock" readonly>${fieldsToCostBlock(s.summed, s.type)}</textarea>
+      ${incomplete ? `<p class="copy-hint" style="color:#a32d2d">\u26a0 Only ${s.periodCount} of the usual ${s.expectedFreq} pay period(s) for this month were uploaded \u2014 this total may be incomplete.</p>` : `<p class="copy-hint">${COST_ROW_ORDER[s.type].map(r => r.label).join(' \u00b7 ')}</p>`}
+    `;
+    wrap.appendChild(block);
+  });
+
+  document.getElementById('results').appendChild(wrap);
 }
 
 function render() {
@@ -1280,6 +1360,7 @@ function render() {
   window._cardStubs = window._cardStubs || {};
   document.querySelectorAll('.stub-card').forEach(c => { window._cardStubs[c._uid] = c; });
   renderTrackerSummary();
+  renderMonthlySummaries(sorted);
 }
 
 function onFieldEdit(uid, field, value) {
@@ -1306,6 +1387,7 @@ function onFieldEdit(uid, field, value) {
   if (dasInput) dasInput.value = stub.das_total;
   const costBlock = document.getElementById(uid + '-costblock');
   if (costBlock) costBlock.value = fieldsToCostBlock(stub, card.dataset.type);
+  refreshMonthlySummaries();
 }
 
 function copyCostBlock(uid) {
