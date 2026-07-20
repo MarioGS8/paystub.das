@@ -244,14 +244,6 @@ function isMarioName(name) {
   return n.includes('mario') || n.includes('starnino');
 }
 
-// Row order per employee type, matching the Apps Script's fieldRowMap offsets exactly
-// (including the blank row 8 gap before the CI/RBC row at offset 9). This is what makes
-// the copy-paste block line up with the actual sheet columns.
-// Row order lived here, matching a blank-divider layout the sheet used to have. Your
-// actual current sheet (confirmed from the ledger file) matches COST_ROW_ORDER below
-// exactly - no blank divider, and it includes Group Health Insurance ER, Accrued
-// Vacation, and CNESST LS as real rows. That one is now the single source of truth.
-
 // Roster: start date (sets each employee's anniversary year for personal-day/CEU limits)
 // plus vacation accrual rate. Start dates are placeholders until the real ones are
 // provided - anything still '2025-01-01' hasn't been confirmed yet.
@@ -386,20 +378,6 @@ function getQuarterKey(dateStr) {
   return `${year}-Q${q}`;
 }
 
-// Bonus is paid once per quarter (lump sum, typically only the quarter's last paystub
-// shows a non-zero amount). Smoothing spreads that lump sum evenly across the 6 bi-monthly
-// pay periods in the quarter (3 months x 2 periods/month), so cost tracking sees the bonus
-// as accrued gradually rather than lumpy. CEU smoothing is a flat $500/12/2 per period,
-// applied regardless of when CEU was actually paid, since it's a flat annual entitlement
-// rather than something earned in a specific period. ceu_benefit is the raw $ actually
-// paid this period, if any, purely so you can see when it happened.
-// When two+ stubs share the exact same employee + pay period, there's no ambiguity about
-// where they belong - unlike a correction landing on a DIFFERENT date, which the tool
-// can't safely guess how to combine. If the stubs' key figures actually differ, they're
-// genuinely separate paycheques for that period (e.g. a normal run + a same-period
-// correction for missed vacation pay) and get summed into one. If the figures are
-// identical, it's much more likely the same PDF got uploaded twice by accident - keep
-// only one and say so, rather than silently doubling someone's pay.
 const SUMMABLE_FIELDS = ['gross_income','stat_holiday_pay','personal_day','bonus','commission',
   'vacation_paid','other','ei_employee','qpp_employee','qpip_employee','ci_insurance_rop',
   'rbc_company_contributions','health_insurance_er','employer_benefits_total','employer_rrsp_total'];
@@ -490,18 +468,9 @@ function calculateDAS(data, isMario) {
 }
 
 // ---- PDF parsing ----
-// Splits a reconstructed line of text into a leading label and a trailing run of
-// numeric-looking tokens ('-' placeholders or values with exactly 2 decimals, since
-// that's how every Current/YTD/Hours/Rate figure is formatted on this paystub template).
 function splitLabelAndNumbers(text) {
   const tokens = text.trim().split(/\s+/).filter(t => t.length);
   const isStrictNum = t => /^\$?\d[\d,]*\.\d{2}$/.test(t);
-  // Scan from the right: a token joins the trailing numeric run if it's a properly
-  // formatted number, or a bare '-' placeholder immediately adjacent (to its right)
-  // to the run already being built. This stops a mid-label hyphen (as in "RBC - GRSP"
-  // or "Treatment - 30 Minutes") from being mistaken for a blank Hours/Rate column,
-  // since the scan halts the instant it hits a token that isn't a number or a
-  // contiguous placeholder dash.
   let splitIdx = tokens.length;
   for (let i = tokens.length - 1; i >= 0; i--) {
     if (isStrictNum(tokens[i]) || tokens[i] === '-') { splitIdx = i; }
@@ -525,12 +494,6 @@ function blankStub() {
 
 function ddmmyyyyToIso(d, m, y) { return `${y}-${m}-${d}`; }
 
-// Consumes the page's reconstructed {left,right} line list and fills one paystub object.
-// Left column = EMPLOYER/EMPLOYEE/BENEFITS/PAY table/TAXES table.
-// Right column = PAY PERIOD/OTHER PAY-CONTRIBUTIONS/DEDUCTIONS/SUMMARY.
-// RBC-GRSP and Employee Health Insurance appear in BOTH "Other Pay/Contributions" and
-// "Deductions" with different values, so the right column needs section tracking to
-// avoid picking up the deduction-side number instead of the employer-contribution one.
 function extractFieldsFromLines(parsedLines) {
   const data = blankStub();
   let rightSection = null;
@@ -541,7 +504,6 @@ function extractFieldsFromLines(parsedLines) {
     const leftTrim = left.trim();
     const rightTrim = right.trim();
 
-    // Employee name (left column, header + address block)
     if (/^EMPLOYEE$/i.test(leftTrim)) { sawEmployeeHeader = true; }
     else if (sawEmployeeHeader && !nameCaptured && leftTrim) {
       data.employee_name = canonicalizeName(leftTrim);
@@ -549,7 +511,6 @@ function extractFieldsFromLines(parsedLines) {
       sawEmployeeHeader = false;
     }
 
-    // Right-column section tracking
     if (/^OTHER\s+PAY\/CONTRIBUTIONS/i.test(rightTrim)) rightSection = 'otherPay';
     else if (/^DEDUCTIONS\s+Current\s+YTD/i.test(rightTrim)) rightSection = 'deductions';
     else if (/^SUMMARY\s+Current\s+YTD/i.test(rightTrim)) rightSection = 'summary';
@@ -620,8 +581,6 @@ async function parsePDFFile(file) {
       return { left, right };
     });
 
-    // A page with no "Pay Stub Detail" marker isn't a paystub page — skip it rather
-    // than emit a blank/garbage entry.
     const hasMarker = parsedLines.some(l => /Pay Stub Detail/i.test(l.left) || /Pay Stub Detail/i.test(l.right));
     if (!hasMarker) continue;
 
@@ -655,7 +614,6 @@ function applyRates() {
   LABOUR_STANDARDS_RATE = (parseFloat(document.getElementById('rate-labour-standards').value) || 0) / 100;
   LABOUR_STANDARDS_CAP = parseFloat(document.getElementById('rate-labour-standards-cap').value) || 0;
 
-  // Recalculate every already-loaded stub with the new rates
   document.querySelectorAll('.stub-card').forEach(card => {
     const stub = card._stub;
     if (!stub) return;
@@ -773,11 +731,7 @@ function loadVacationRatesFile(input) {
 const PERSONAL_DAY_CAP = 2;   // per employment year
 const CEU_CAP = 500;          // dollars per employment year
 
-// Auto-populated from paystubs: each entry = one personal day used. Deduped by
-// employee+period so re-uploading the same paystub twice doesn't double-count.
 let PERSONAL_DAY_LOG = [];
-// Manually entered - CEU never appears on a paystub per your setup, it only lives in
-// the master DAS sheet.
 let CEU_LOG = [];
 
 function logPersonalDaysFromStubs(stubs) {
@@ -896,12 +850,6 @@ function logGrossHistoryFromStubs(stubs) {
   }
 }
 
-// Field labels this ledger's row structure uses. COST_ROW_ORDER covers the "actionable"
-// rows (values this tool reads or writes). PASSTHROUGH_ROW_LABELS covers rows that exist
-// in the sheet but aren't sourced from here - they must still be recognized as field rows
-// (not new-employee headers), or the parser loses track of whose block it's in the moment
-// it hits one. 'Bonus Quarterly Smoothing' sits between CNESST LS and CEU Benefit in every
-// regular/mario block, so without this the CEU Benefit row below it would be misread.
 const PASSTHROUGH_ROW_LABELS = ['Bonus Quarterly Smoothing', 'CEU Monthly Smoothing', 'Other'];
 const CEU_BENEFIT_LABEL = 'CEU Benefit - $500';
 
@@ -922,15 +870,6 @@ function ledgerIsoDate(d) {
   return d.toISOString().slice(0, 10);
 }
 
-// Reads every "* Employees Costs" sheet in the workbook. Column-A labels mark either an
-// employee name (start of a new block) or a known field row; date-valued header cells
-// (row starting with 'Pay Period') mark real period columns, distinct from the month-total
-// columns which carry a string label instead - only date columns get read, so totals are
-// never double-counted. Seeds PERSONAL_DAY_LOG and CEU_LOG (both deduped, same as
-// paystub-sourced entries) and GROSS_HISTORY for the CNESST Labour Standards cap check.
-// Katherine Campeau's block has none of Personal Day / Bonus / CEU rows at all (she's
-// marked eligible:false in the roster), so nothing here needs to special-case her - the
-// parser simply never finds those labels in her block and moves on.
 function parseLedgerWorkbook(workbook) {
   const summary = { employees: new Set(), personalDaysFound: 0, ceuFound: 0, periodsFound: 0, sheetsRead: [], skipped: new Set() };
   const fieldLabels = getLedgerFieldLabels();
@@ -984,7 +923,7 @@ function parseLedgerWorkbook(workbook) {
         if (EMPLOYEE_ROSTER.hasOwnProperty(canonical)) {
           currentEmployee = canonical;
         } else {
-          currentEmployee = null; // not in roster (e.g. Jeffery Kim) - every actionable row below no-ops on null, so this block contributes nothing
+          currentEmployee = null;
           summary.skipped.add(label);
         }
       }
@@ -1125,9 +1064,6 @@ function validateStub(stub, type, isMario, prevGrossForEmployee) {
   return flags;
 }
 
-// Full cost-visibility breakdown per employee type, matching your actual current sheet
-// structure (confirmed against the ledger file) - not a separate view, this is the real
-// row order.
 const COST_ROW_ORDER = {
   kathy: [
     {f:'gross_income',label:'Gross Income'}, {f:'stat_holiday_pay',label:'Stat Holiday Pay'},
@@ -1159,7 +1095,6 @@ function render() {
   resultsEl.innerHTML = '';
   if (allStubs.length === 0) return;
 
-  // Sort by employee then by period end, so within-batch swing comparisons make sense
   const sortedRaw = [...allStubs].sort((a, b) => {
     if (a.employee_name !== b.employee_name) return a.employee_name.localeCompare(b.employee_name);
     return (a.pay_period_end || '').localeCompare(b.pay_period_end || '');
@@ -1185,10 +1120,6 @@ function render() {
     resultsEl.appendChild(mergeEl);
   }
 
-  // Flag 3+ DISTINCT periods for one employee in the same calendar month - likely an
-  // off-cycle correction landing on its own separate date (not the same period as an
-  // existing one, which mergeSamePeriodStubs already handled above). The sheet only has
-  // 2 columns per month, so this still needs manual combining into the right column.
   const byEmployeeMonth = {};
   for (const s of sorted) {
     if (!s.employee_name || !s.pay_period_end) continue;
@@ -1269,7 +1200,6 @@ function render() {
               ${type==='regular'?fieldRow('rbc_company_contributions','RBC Company Contributions'):''}
               ${fieldRow('accrued_vacation','Accrued Vacation')}
               ${fieldRow('labour_standards','CNESST Labour Standards')}
-              ${type!=='kathy'?fieldRow('bonus_smoothing','Bonus Monthly Smoothing'):''}
               ${ceuEligible?fieldRow('ceu_benefit','CEU Benefit (this period)'):''}
               ${ceuEligible?fieldRow('ceu_smoothing','CEU Monthly Smoothing'):''}
               ${fieldRow('other','Other (catch-all)')}
@@ -1310,9 +1240,6 @@ function onFieldEdit(uid, field, value) {
   const newVal = parseFloat(value) || 0;
   const delta = newVal - oldVal;
   stub[field] = newVal;
-  // rbc_company_contributions and ci_insurance_rop feed calculateDAS indirectly via
-  // employer_rrsp_total (CNESST base) and employer_benefits_total (HSF base) - adjust
-  // those by the same delta so a manual correction here actually changes the DAS total.
   if (field === 'rbc_company_contributions') {
     stub.employer_rrsp_total = (stub.employer_rrsp_total || 0) + delta;
     stub.employer_benefits_total = (stub.employer_benefits_total || 0) + delta;
