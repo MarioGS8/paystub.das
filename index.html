@@ -566,7 +566,14 @@ function extractFieldsFromLines(parsedLines) {
       const current = numbers.length >= 2 ? numbers[numbers.length - 2] : (numbers[0] || 0);
       if (/^(Stat Holiday Pay|Stat pay - average daily wage|Tier 1 - Statutory Holiday|Tier 3 - Statutory Holiday)$/i.test(label)) {
         data.stat_holiday_pay = parseFloat((data.stat_holiday_pay + current).toFixed(2));
-      } else if (/^Vacation\s+Pay$/i.test(label)) data.vacation_paid = current;
+      } else if (/^Vacation\s+Pa(y|id)$/i.test(label)) {
+        // Two distinct row labels can both appear on the SAME stub: "Vacation Pay" (the
+        // hours x rate line, usually $0.00 unless vacation was booked as hours) and
+        // "Vacation Paid" (a separate lump-sum payout line with no hours, used for manual
+        // vacation payouts). Sum rather than overwrite, so a stub with both rows captures
+        // the real total instead of whichever label happened to be parsed last.
+        data.vacation_paid = parseFloat((data.vacation_paid + current).toFixed(2));
+      }
       else if (/^Commission$/i.test(label)) data.commission = current;
       else if (/^Personal\s+Day$/i.test(label)) data.personal_day = current;
       else if (/^Bonus$/i.test(label)) data.bonus = current;
