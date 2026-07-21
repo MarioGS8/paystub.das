@@ -47,7 +47,7 @@
   .copy-btn { font-size: 12px; padding: 5px 12px; background: #1a1a18; color: #fff; border: none; border-radius: 6px; cursor: pointer; }
   .copy-btn:hover { opacity: 0.85; }
   .copy-btn.copied { background: #0f6e56; }
-  textarea.copy-paste { width: 100%; min-height: 220px; font-family: ui-monospace, 'SF Mono', Menlo, monospace; font-size: 13px; padding: 10px; border: 0.5px solid rgba(0,0,0,0.15); border-radius: 6px; background: #fff; resize: vertical; line-height: 1.6; }
+  textarea.copy-paste { width: 100%; min-height: 220px; font-family: ui-monospace, 'SF Mono', Menlo, monospace; font-size: 13px; padding: 10px; border: 0.5px solid rgba(0,0,0,0.15); border-radius: 6px; background: #fff; resize: vertical; line-height: 1.6; white-space: pre; overflow-x: auto; }
   .copy-hint { font-size: 11px; color: #5f5e5a; margin-top: 6px; }
 
   .das-hint { font-size: 11px; color: #5f5e5a; margin-top: 4px; }
@@ -1281,7 +1281,7 @@ function renderMonthlySummaries(stubsWithFields) {
         <button class="copy-btn" id="${uid}-costcopybtn" onclick="copyCostBlock('${uid}')">Copy</button>
       </div>
       <p style="font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:12px;color:#5f5e5a;margin-bottom:4px;">${monthLabelsRow} <span style="color:#b8b7b3">(3 cols each: P1 \u00b7 P2 \u00b7 Total \u2014 reference only, not part of the copied text)</span></p>
-      <textarea class="copy-paste" id="${uid}-costblock" readonly style="min-height:260px">${g.text}</textarea>
+      <textarea class="copy-paste" id="${uid}-costblock" readonly wrap="off" style="min-height:260px">${g.text}</textarea>
       <p class="copy-hint">Rows: ${COST_ROW_ORDER[g.type].map(r => r.label).join(' \u00b7 ')}. Each row runs Jan P1 \u2192 Jan P2 \u2192 Jan Total \u2192 Feb P1 \u2026 through the last uploaded month.</p>
     `;
     wrap.appendChild(block);
