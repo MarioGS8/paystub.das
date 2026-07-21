@@ -295,6 +295,7 @@ function getGroupPremiumFor(employeeName) {
 // of silently splitting across two "people."
 const NAME_ALIASES = {
   'ryle justin hernandez': 'Justin Hernandez',
+  'ryle justin j. hernandez': 'Justin Hernandez', // paystub prints a middle initial "J." not present in the contract's short form
   'justin hernandez': 'Justin Hernandez',
   'boomsara, alexis': 'Alexis Boosamra', // ledger spells the surname differently than the signed contract ("Boosamra") - flagged, not silently assumed
   'boosamra, alexis': 'Alexis Boosamra',
