@@ -534,7 +534,14 @@ function ddmmyyyyToIso(d, m, y) { return `${y}-${m}-${d}`; }
 // then, anything not on this list AND not already a tracked field gets flagged below.
 const KNOWN_IGNORED_PAY_LABELS = new Set([
   'Regular Pay', 'Treatment - 30 Minutes', 'Treatment - 45 Minutes', 'Treatment - 60 Minutes',
-  'Admin & Cleaning Hours', 'Charting', 'Marketing',
+  'Admin & Cleaning Hours', 'Charting', 'Marketing', 'Sick Pay',
+  // TAXES-table lines - the TAXES table sits in the same left-hand column as PAY and gets
+  // parsed by the same loop, so these need whitelisting too. Income Tax and QC Income Tax
+  // are nonzero on nearly every stub (pure withholding, correctly never fed into DAS/HSF),
+  // so without this they'd false-positive as anomalies on almost every single paystub.
+  // Second QC Pension Plan is usually $0.00 today but whitelisted proactively in case a
+  // future employee ever triggers the second-tier QPP contribution.
+  'Income Tax', 'QC Income Tax', 'Second QC Pension Plan',
 ].map(normalizeLabel));
 
 function extractFieldsFromLines(parsedLines) {
@@ -1210,7 +1217,16 @@ function buildYearlyGrid(type, employeeStubs) {
   const years = employeeStubs.map(s => parseInt((s.pay_period_end || '').slice(0, 4), 10)).filter(Boolean);
   const year = years.length ? Math.min(...years) : new Date().getFullYear();
   const monthNames = ['January','February','March','April','May','June','July','August','September','October','November','December'];
-  const orderedLabels = monthNames.map(m => `${m} ${year}`);
+  const allLabels = monthNames.map(m => `${m} ${year}`);
+  // Only extend the grid through the LAST month that actually has data. A blank cell
+  // still overwrites/clears whatever's in that sheet cell on paste - it isn't a no-op -
+  // so trailing months with nothing uploaded yet must be dropped entirely, not left blank.
+  // A gap BETWEEN two uploaded months (e.g. Jan and March uploaded, Feb skipped) still
+  // needs to render as blank columns, since April's real position in the sheet depends on
+  // Feb/March's columns existing even if empty.
+  let lastIndexWithData = -1;
+  allLabels.forEach((label, i) => { if (groups[label]) lastIndexWithData = i; });
+  const orderedLabels = allLabels.slice(0, lastIndexWithData + 1);
 
   const rowLines = COST_ROW_ORDER[type].map(rowDef => {
     const cells = [];
@@ -1227,7 +1243,7 @@ function buildYearlyGrid(type, employeeStubs) {
     return cells.join('\t');
   });
   const monthsWithData = Object.keys(groups).length;
-  return { text: rowLines.join('\n'), year, monthsWithData };
+  return { text: rowLines.join('\n'), year, monthsWithData, orderedLabels };
 }
 
 function computeMonthlySummaries(stubsWithFields) {
@@ -1255,6 +1271,7 @@ function renderMonthlySummaries(stubsWithFields) {
 
   grids.forEach((g, idx) => {
     const uid = 'year' + idx;
+    const monthLabelsRow = g.orderedLabels.map(l => l.split(' ')[0]).join('  \u00b7  ');
     const block = document.createElement('div');
     block.className = 'copy-block';
     block.style.marginBottom = '1rem';
@@ -1263,8 +1280,9 @@ function renderMonthlySummaries(stubsWithFields) {
         <span>${g.employee} \u2014 ${g.year} (${g.monthsWithData} month${g.monthsWithData === 1 ? '' : 's'} of data uploaded)</span>
         <button class="copy-btn" id="${uid}-costcopybtn" onclick="copyCostBlock('${uid}')">Copy</button>
       </div>
+      <p style="font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:12px;color:#5f5e5a;margin-bottom:4px;">${monthLabelsRow} <span style="color:#b8b7b3">(3 cols each: P1 \u00b7 P2 \u00b7 Total \u2014 reference only, not part of the copied text)</span></p>
       <textarea class="copy-paste" id="${uid}-costblock" readonly style="min-height:260px">${g.text}</textarea>
-      <p class="copy-hint">Rows: ${COST_ROW_ORDER[g.type].map(r => r.label).join(' \u00b7 ')}. Each row runs Jan P1 \u2192 Jan P2 \u2192 Jan Total \u2192 Feb P1 \u2026 through Dec Total.</p>
+      <p class="copy-hint">Rows: ${COST_ROW_ORDER[g.type].map(r => r.label).join(' \u00b7 ')}. Each row runs Jan P1 \u2192 Jan P2 \u2192 Jan Total \u2192 Feb P1 \u2026 through the last uploaded month.</p>
     `;
     wrap.appendChild(block);
   });
