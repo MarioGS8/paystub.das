@@ -547,6 +547,13 @@ const KNOWN_IGNORED_PAY_LABELS = new Set([
 function extractFieldsFromLines(parsedLines) {
   const data = blankStub();
   let rightSection = null;
+  // Left-column section tracking, mirroring the right column's rightSection tracking.
+  // Without this, the parser has no way to tell the BENEFITS block (Vacation/Sick
+  // Accrued/Used/Available balances - informational, never actual payroll dollars, and a
+  // different 3-number-per-row format) apart from the real PAY and TAXES tables. That gap
+  // is exactly what caused "Vacation" and "Vacation $" to get misread as unrecognized PAY
+  // lines. null = employer/employee header block before BENEFITS starts.
+  let leftSection = null;
   let sawEmployeeHeader = false;
   let nameCaptured = false;
 
@@ -560,6 +567,10 @@ function extractFieldsFromLines(parsedLines) {
       nameCaptured = true;
       sawEmployeeHeader = false;
     }
+
+    if (/^BENEFITS/i.test(leftTrim)) leftSection = 'benefits';
+    else if (/^PAY\s+Hours/i.test(leftTrim)) leftSection = 'pay';
+    else if (/^TAXES\s+Current/i.test(leftTrim)) leftSection = 'taxes';
 
     if (/^OTHER\s+PAY\/CONTRIBUTIONS/i.test(rightTrim)) rightSection = 'otherPay';
     else if (/^DEDUCTIONS\s+Current\s+YTD/i.test(rightTrim)) rightSection = 'deductions';
@@ -580,7 +591,11 @@ function extractFieldsFromLines(parsedLines) {
       }
     }
 
-    if (leftTrim) {
+    // Everything below only runs inside the PAY or TAXES sections. The BENEFITS block
+    // (and the employer/employee header block before it) is deliberately never touched -
+    // its Accrued/Used/Available balances aren't payroll transactions and were never
+    // meant to be parsed, let alone flagged as anomalies.
+    if (leftTrim && (leftSection === 'pay' || leftSection === 'taxes')) {
       const { label, numbers } = splitLabelAndNumbers(left);
       const current = numbers.length >= 2 ? numbers[numbers.length - 2] : (numbers[0] || 0);
       if (/^(Stat Holiday Pay|Stat pay - average daily wage|Tier 1 - Statutory Holiday|Tier 3 - Statutory Holiday)$/i.test(label)) {
