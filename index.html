@@ -534,7 +534,7 @@ function ddmmyyyyToIso(d, m, y) { return `${y}-${m}-${d}`; }
 // then, anything not on this list AND not already a tracked field gets flagged below.
 const KNOWN_IGNORED_PAY_LABELS = new Set([
   'Regular Pay', 'Treatment - 30 Minutes', 'Treatment - 45 Minutes', 'Treatment - 60 Minutes',
-  'Admin & Cleaning Hours', 'Charting', 'Marketing', 'Sick Pay',
+  'Admin & Cleaning Hours', 'Charting', 'Marketing', 'Sick Pay', 'Message Therapy',
   // TAXES-table lines - the TAXES table sits in the same left-hand column as PAY and gets
   // parsed by the same loop, so these need whitelisting too. Income Tax and QC Income Tax
   // are nonzero on nearly every stub (pure withholding, correctly never fed into DAS/HSF),
