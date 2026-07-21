@@ -536,7 +536,7 @@ function ddmmyyyyToIso(d, m, y) { return `${y}-${m}-${d}`; }
 // then, anything not on this list AND not already a tracked field gets flagged below.
 const KNOWN_IGNORED_PAY_LABELS = new Set([
   'Regular Pay', 'Treatment - 30 Minutes', 'Treatment - 45 Minutes', 'Treatment - 60 Minutes',
-  'Admin & Cleaning Hours', 'Charting', 'Marketing', 'Sick Pay', 'Message Therapy', 'Manager',
+  'Admin & Cleaning Hours', 'Charting', 'Marketing', 'Message Therapy', 'Manager',
   // TAXES-table lines - the TAXES table sits in the same left-hand column as PAY and gets
   // parsed by the same loop, so these need whitelisting too. Income Tax and QC Income Tax
   // are nonzero on nearly every stub (pure withholding, correctly never fed into DAS/HSF),
@@ -611,7 +611,15 @@ function extractFieldsFromLines(parsedLines) {
         data.vacation_paid = parseFloat((data.vacation_paid + current).toFixed(2));
       }
       else if (/^Commission$/i.test(label)) data.commission = current;
-      else if (/^Personal\s+Day$/i.test(label)) data.personal_day = current;
+      else if (/^Personal\s+Day$/i.test(label)) {
+        // Sick Pay draws from the SAME 2-days-per-employment-year allowance as Personal
+        // Day (owner confirmed) - not a separate leave category. Sum both labels into one
+        // field rather than overwrite, matching the Vacation Pay/Paid and Other/Commission
+        // merge pattern used elsewhere, so a stub with both rows still captures the total.
+        data.personal_day = parseFloat((data.personal_day + current).toFixed(2));
+      } else if (/^Sick\s+Pay$/i.test(label)) {
+        data.personal_day = parseFloat((data.personal_day + current).toFixed(2));
+      }
       else if (/^Bonus$/i.test(label)) data.bonus = current;
       else if (/^Other$/i.test(label)) data.other = current;
       else if (/^Employment\s+Insurance$/i.test(label)) data.ei_employee = current;
