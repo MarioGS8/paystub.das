@@ -957,9 +957,27 @@ function normalizeLabel(s) {
   return (s || '').toString().toLowerCase().replace(/\s+/g, '');
 }
 
+// The REAL literal row labels used in the actual "Employees Costs" spreadsheet -
+// deliberately kept SEPARATE from COST_ROW_ORDER's display captions (the paste-block UI
+// labels), which have been renamed multiple times for on-screen clarity (e.g. "Group
+// Health Insurance ER" -> "Group Benefits Premium (ER)"). The real sheet still says
+// "Group Health Insurance ER" - it was never renamed there. When getLedgerFieldLabels()
+// derived its known-field set from COST_ROW_ORDER captions, every UI rename silently
+// broke ledger parsing: an unrecognized row label gets misread as a failed employee-name
+// lookup, which resets employee tracking to null and drops every row after it in that
+// block - including CEU Benefit and CEU Monthly Smoothing. "RBC - Employer Contribution"
+// and the rate-suffixed "Accrued Vacation 6%/4%" were ALSO never in sync with the sheet,
+// even before any renames - this list fixes both. Update this list (not COST_ROW_ORDER)
+// if the actual spreadsheet's row wording ever changes.
+const LEDGER_FIELD_LABELS = [
+  'Gross Income', 'Stat Holiday Pay', 'Personal Day', 'Bonus', 'Commission', 'Vacation Paid',
+  'DAS', 'Group Health Insurance ER', 'CI Insurance ROP', 'RBC - Employer Contribution',
+  'Accrued Vacation', 'Accrued Vacation 6%', 'Accrued Vacation 4%', 'CNESST LS (0.0006)',
+];
+
 function getLedgerFieldLabels() {
   return new Set(
-    [].concat(COST_ROW_ORDER.regular, COST_ROW_ORDER.mario, COST_ROW_ORDER.kathy).map(r => normalizeLabel(r.label))
+    LEDGER_FIELD_LABELS.map(normalizeLabel)
       .concat(PASSTHROUGH_ROW_LABELS.map(normalizeLabel))
       .concat([normalizeLabel(CEU_BENEFIT_LABEL)])
   );
